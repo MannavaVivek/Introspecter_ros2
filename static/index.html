@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>ROS2 Topic Browser</title>
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="stylesheet" href="/static/styles.css">
+    </head>
+    <body>
+        <div class="app" role="application" aria-labelledby="title">
+            <h1 id="title">ROS2 Topic Browser</h1>
+            <p class="subtitle">
+                Displays topics detected from your ROS2 system. Use
+                <strong>Up</strong> / <strong>Down</strong> to move the
+                highlighter.
+            </p>
+
+            <div class="controls">
+                <label>
+                    Poll interval:
+                    <select id="pollInterval">
+                        <option value="500">500ms</option>
+                        <option value="1000" selected>1s</option>
+                        <option value="2000">2s</option>
+                        <option value="5000">5s</option>
+                    </select>
+                </label>
+                <button id="refreshBtn" title="Force refresh">Refresh</button>
+                <div class="status" id="status">idle</div>
+            </div>
+
+            <div
+                id="list"
+                class="list"
+                tabindex="0"
+                role="listbox"
+                aria-label="ROS2 topics"
+            >
+                <div class="empty" id="empty">Loading topics…</div>
+            </div>
+
+            <div class="hint">
+                Click an item or use the arrow keys. Selected topic will be
+                shown in the console (for now).
+            </div>
+        </div>
+
+    <script src="/static/app.js" defer></script>
+    </body>
+</html>
