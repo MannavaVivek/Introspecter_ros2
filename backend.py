@@ -409,7 +409,12 @@ def get_nodes():
             if name.startswith('_ros2cli'):
                 continue
             
-            full_name = f"{namespace}/{name}" if namespace != "/" else f"/{name}"
+            # Clean up namespace and create full name
+            clean_namespace = namespace if namespace and namespace != "/" else ""
+            if clean_namespace and not clean_namespace.startswith('/'):
+                clean_namespace = '/' + clean_namespace
+            
+            full_name = f"{clean_namespace}/{name}" if clean_namespace else f"/{name}"
             full_name = full_name.replace("//", "/")
             
             result.append({
@@ -425,3 +430,124 @@ def get_nodes():
     except Exception as e:
         logging.getLogger('topic_list_node').exception("Failed to get nodes")
         return JSONResponse({"error": f"Failed to get nodes: {e}"}, status_code=500)
+
+
+@app.get("/api/topic_info/{topic:path}")
+def get_topic_info(topic: str):
+    """Get detailed information about a specific topic."""
+    global node
+    if node is None:
+        return JSONResponse({"error": "ROS2 node not initialized"}, status_code=500)
+    
+    try:
+        # Get topic type
+        topics = node.get_topic_names_and_types()
+        topic_type = None
+        for name, types in topics:
+            if name == topic and types:
+                topic_type = types[0]
+                break
+        
+        # Get publishers and subscribers count
+        publishers_info = node.get_publishers_info_by_topic(topic)
+        subscribers_info = node.get_subscriptions_info_by_topic(topic)
+        
+        # Format node names - replace ros2cli with friendly name
+        def format_node_name(node_name):
+            if node_name.startswith('_ros2cli'):
+                return 'ros2_cli_command'
+            return node_name
+        
+        result = {
+            "topic": topic,
+            "type": topic_type,
+            "publishers_count": len(publishers_info),
+            "subscribers_count": len(subscribers_info),
+            "publishers": [{"node_name": format_node_name(p.node_name), "node_namespace": p.node_namespace} for p in publishers_info],
+            "subscribers": [{"node_name": format_node_name(s.node_name), "node_namespace": s.node_namespace} for s in subscribers_info],
+        }
+        
+        # Add monitoring info if available
+        if topic in node.monitors:
+            rate = node.monitors[topic].get_rate()
+            result.update({
+                "monitored": True,
+                "node_rate_hz": rate.get("node_rate_hz", 0),
+                "msg_rate_hz": rate.get("msg_rate_hz", 0),
+                "sample_count": rate.get("sample_count", 0),
+                "expected_rate_hz": rate.get("expected_rate_hz"),
+            })
+        else:
+            result["monitored"] = False
+        
+        return JSONResponse(result)
+    except Exception as e:
+        logging.getLogger('topic_list_node').exception(f"Failed to get info for topic {topic}")
+        return JSONResponse({"error": f"Failed to get topic info: {e}"}, status_code=500)
+
+
+@app.get("/api/node_info/{node_name:path}")
+def get_node_info(node_name: str):
+    """Get detailed information about a specific node."""
+    global node
+    if node is None:
+        return JSONResponse({"error": "ROS2 node not initialized"}, status_code=500)
+    
+    try:
+        # Parse node name and namespace
+        # node_name could be "/namespace/name" format
+        parts = node_name.split('/')
+        if len(parts) >= 2:
+            name = parts[-1]
+            namespace = '/'.join(parts[:-1]) if len(parts) > 2 else '/'
+        else:
+            name = node_name
+            namespace = '/'
+        
+        # Get topics this node publishes and subscribes to
+        all_topics = node.get_topic_names_and_types()
+        
+        publishers = []
+        subscribers = []
+        
+        for topic_name, types in all_topics:
+            # Check publishers
+            pubs_info = node.get_publishers_info_by_topic(topic_name)
+            for pub in pubs_info:
+                pub_ns = pub.node_namespace if pub.node_namespace else '/'
+                if pub.node_name == name and pub_ns == namespace:
+                    publishers.append({
+                        "topic": topic_name,
+                        "type": types[0] if types else ""
+                    })
+                    break
+            
+            # Check subscribers
+            subs_info = node.get_subscriptions_info_by_topic(topic_name)
+            for sub in subs_info:
+                sub_ns = sub.node_namespace if sub.node_namespace else '/'
+                if sub.node_name == name and sub_ns == namespace:
+                    subscribers.append({
+                        "topic": topic_name,
+                        "type": types[0] if types else ""
+                    })
+                    break
+        
+        # Get services
+        service_names = node.get_service_names_and_types_by_node(name, namespace)
+        services = [{"name": svc_name, "type": svc_types[0] if svc_types else ""} 
+                   for svc_name, svc_types in service_names]
+        
+        result = {
+            "name": name,
+            "namespace": namespace,
+            "full_name": node_name,
+            "publishers": publishers,
+            "subscribers": subscribers,
+            "services": services,
+        }
+        
+        return JSONResponse(result)
+    except Exception as e:
+        logging.getLogger('topic_list_node').exception(f"Failed to get info for node {node_name}")
+        return JSONResponse({"error": f"Failed to get node info: {e}"}, status_code=500)

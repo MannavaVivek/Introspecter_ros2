@@ -439,6 +439,128 @@ h1 {
     box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.08);
     outline: none;
 }
+/* Expandable Details Styles */
+.topic-details,
+.node-details {
+    margin: 6px;
+    padding: 16px;
+    background: rgba(6, 182, 212, 0.03);
+    border: 1px solid rgba(6, 182, 212, 0.15);
+    border-radius: 6px;
+    animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.details-section {
+    color: var(--white);
+}
+
+.details-header {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(6, 182, 212, 0.2);
+}
+
+.details-subheader {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-top: 16px;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.details-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.detail-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.detail-label {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 500;
+}
+
+.detail-value {
+    font-size: 13px;
+    color: var(--white);
+}
+
+.detail-value.monospace {
+    font-family: monospace;
+    font-size: 12px;
+}
+
+.details-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.details-list .list-item {
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    font-size: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.details-list .list-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(6, 182, 212, 0.2);
+}
+
+.details-list .topic-name {
+    font-family: monospace;
+    color: var(--white);
+    flex: 1;
+}
+
+.details-list .topic-type {
+    font-family: monospace;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.details-loading {
+    padding: 20px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.monospace {
+    font-family: monospace;
+}
+
 /* Node Browser Styles */
 .node-header {
     display: grid;

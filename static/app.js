@@ -20,6 +20,8 @@ let expectedRates = {}; // store expected rates per topic: { "topic_name": expec
 let editingRateIndex = -1; // index of topic currently being edited
 let isInputRendered = false; // track if input is currently rendered
 let showMonitoredOnly = false; // filter to show only monitored topics
+let expandedTopicIndex = -1; // index of expanded topic (-1 means none)
+let topicDetailsCache = {}; // cache for topic details
 
 // Node browser state
 let nodes = []; // array of node objects
@@ -27,6 +29,8 @@ let filteredNodes = []; // filtered based on search
 let selectedNodeIndex = -1;
 let nodeSearchQuery = "";
 let nodesPollTimer = null;
+let expandedNodeIndex = -1; // index of expanded node (-1 means none)
+let nodeDetailsCache = {}; // cache for node details
 
 const listEl = document.getElementById("list");
 const statusEl = document.getElementById("status");
@@ -109,6 +113,90 @@ function updateRatesOnly() {
             topicEl.classList.remove('monitored');
         }
     });
+}
+
+// Fetch detailed information about a topic
+async function fetchTopicDetails(topicName, forceRefresh = false) {
+    if (!forceRefresh && topicDetailsCache[topicName]) {
+        return topicDetailsCache[topicName];
+    }
+    
+    try {
+        const response = await fetch(`/api/topic_info/${encodeURIComponent(topicName)}`, { cache: "no-store" });
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const data = await response.json();
+        topicDetailsCache[topicName] = data;
+        return data;
+    } catch (err) {
+        console.error("Failed to fetch topic details:", err);
+        return null;
+    }
+}
+
+// Update the expanded topic details without full re-render
+function updateExpandedTopicDetails() {
+    if (expandedTopicIndex < 0 || expandedTopicIndex >= filteredTopics.length) return;
+    
+    const t = filteredTopics[expandedTopicIndex];
+    const details = topicDetailsCache[t.topic];
+    if (!details) return;
+    
+    // Find the details element in the DOM
+    const detailsEl = listEl.querySelector('.topic-details');
+    if (!detailsEl) return;
+    
+    // Update the details content
+    detailsEl.innerHTML = `
+        <div class="details-section">
+            <div class="details-header">Topic Information</div>
+            <div class="details-grid">
+                <div class="detail-item">
+                    <span class="detail-label">Type:</span>
+                    <span class="detail-value monospace">${details.type || 'N/A'}</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Publishers:</span>
+                    <span class="detail-value">${details.publishers_count || 0}</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Subscribers:</span>
+                    <span class="detail-value">${details.subscribers_count || 0}</span>
+                </div>
+                ${details.monitored ? `
+                    <div class="detail-item">
+                        <span class="detail-label">Sample Count:</span>
+                        <span class="detail-value">${details.sample_count || 0}</span>
+                    </div>
+                ` : ''}
+            </div>
+            ${details.publishers && details.publishers.length > 0 ? `
+                <div class="details-subheader">Publishing Nodes</div>
+                <div class="details-list">
+                    ${details.publishers.map(p => {
+                        const ns = p.node_namespace && p.node_namespace !== '/' ? p.node_namespace : '';
+                        return `<div class="list-item monospace">${ns}/${p.node_name}</div>`.replace('//', '/');
+                    }).join('')}
+                </div>
+            ` : ''}
+            ${details.subscribers && details.subscribers.length > 0 ? `
+                <div class="details-subheader">Subscribing Nodes</div>
+                <div class="details-list">
+                    ${details.subscribers.map(s => {
+                        const ns = s.node_namespace && s.node_namespace !== '/' ? s.node_namespace : '';
+                        return `<div class="list-item monospace">${ns}/${s.node_name}</div>`.replace('//', '/');
+                    }).join('')}
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+// Collapse expanded topic
+function collapseTopicDetails() {
+    if (expandedTopicIndex >= 0) {
+        expandedTopicIndex = -1;
+        renderList();
+    }
 }
 
 // Filter topics based on search query and monitored status
@@ -212,7 +300,19 @@ async function fetchTopicsOnce() {
             selectedIndex = -1;
         }
 
-        renderList();
+        // If details are expanded, only update rates to avoid flashing
+        if (expandedTopicIndex >= 0) {
+            updateRatesOnly();
+            // Also refresh the expanded topic details
+            const expandedTopic = filteredTopics[expandedTopicIndex];
+            if (expandedTopic) {
+                await fetchTopicDetails(expandedTopic.topic, true); // Force refresh
+                // Re-render just the details section
+                updateExpandedTopicDetails();
+            }
+        } else {
+            renderList();
+        }
         setStatus(`last: ${new Date().toLocaleTimeString()}`);
     } catch (err) {
         setStatus("error: " + (err.message || err));
@@ -394,12 +494,105 @@ function renderList() {
         item.appendChild(rate);
         item.appendChild(expectedRateCell);
 
-        // click -> select and log
-        item.addEventListener("click", () => {
+        // click -> select and collapse details
+        item.addEventListener("click", (e) => {
+            // Don't trigger if clicking on input field
+            if (e.target.classList.contains('expected-rate-input')) return;
             setSelectedIndex(i, { userAction: true });
+            // Always collapse details on single click
+            if (expandedTopicIndex >= 0) {
+                collapseTopicDetails();
+            }
+        });
+
+        // double-click -> expand details
+        item.addEventListener("dblclick", async (e) => {
+            e.preventDefault();
+            if (expandedTopicIndex === i) {
+                // Already expanded, collapse it
+                collapseTopicDetails();
+            } else {
+                // Expand this item
+                expandedTopicIndex = i;
+                setSelectedIndex(i, { userAction: false });
+                renderList(); // Re-render to show loading
+                
+                // Fetch details
+                const details = await fetchTopicDetails(t.topic);
+                if (details && expandedTopicIndex === i) {
+                    // Still expanded, render with details
+                    renderList();
+                }
+            }
         });
 
         listEl.appendChild(item);
+        
+        // Add expanded details section if this is the expanded item
+        if (i === expandedTopicIndex) {
+            const detailsRow = document.createElement("div");
+            detailsRow.className = "topic-details";
+            
+            // Prevent clicks inside details from bubbling up
+            detailsRow.addEventListener("click", (e) => {
+                e.stopPropagation();
+            });
+            
+            const details = topicDetailsCache[t.topic];
+            if (details) {
+                detailsRow.innerHTML = `
+                    <div class="details-section">
+                        <div class="details-header">Topic Information</div>
+                        <div class="details-grid">
+                            <div class="detail-item">
+                                <span class="detail-label">Type:</span>
+                                <span class="detail-value monospace">${details.type || 'N/A'}</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Publishers:</span>
+                                <span class="detail-value">${details.publishers_count || 0}</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Subscribers:</span>
+                                <span class="detail-value">${details.subscribers_count || 0}</span>
+                            </div>
+                            ${details.monitored ? `
+                                <div class="detail-item">
+                                    <span class="detail-label">Sample Count:</span>
+                                    <span class="detail-value">${details.sample_count || 0}</span>
+                                </div>
+                            ` : ''}
+                        </div>
+                        ${details.publishers && details.publishers.length > 0 ? `
+                            <div class="details-subheader">Publishing Nodes</div>
+                            <div class="details-list">
+                                ${details.publishers.map(p => {
+                                    const ns = p.node_namespace && p.node_namespace !== '/' ? p.node_namespace : '';
+                                    return `<div class="list-item monospace">${ns}/${p.node_name}</div>`.replace('//', '/');
+                                }).join('')}
+                            </div>
+                        ` : ''}
+                        ${details.subscribers && details.subscribers.length > 0 ? `
+                            <div class="details-subheader">Subscribing Nodes</div>
+                            <div class="details-list">
+                                ${details.subscribers.map(s => {
+                                    const ns = s.node_namespace && s.node_namespace !== '/' ? s.node_namespace : '';
+                                    return `<div class="list-item monospace">${ns}/${s.node_name}</div>`.replace('//', '/');
+                                }).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            } else {
+                detailsRow.innerHTML = `
+                    <div class="details-section">
+                        <div class="details-loading">Loading details...</div>
+                    </div>
+                `;
+            }
+            
+            listEl.appendChild(detailsRow);
+        }
     });
 
     // ensure selected is visible
@@ -487,11 +680,13 @@ function onKeyDown(e) {
         return;
     }
     if (e.key === "ArrowUp") {
+        collapseTopicDetails();
         setSelectedIndex(
             selectedIndex <= 0 ? 0 : selectedIndex - 1,
             { userAction: true },
         );
     } else if (e.key === "ArrowDown") {
+        collapseTopicDetails();
         setSelectedIndex(
             selectedIndex >= filteredTopics.length - 1
                 ? filteredTopics.length - 1
@@ -499,6 +694,7 @@ function onKeyDown(e) {
             { userAction: true },
         );
     } else if (e.key === "PageUp") {
+        collapseTopicDetails();
         const visible = Math.max(
             1,
             Math.floor(listEl.clientHeight / 48),
@@ -507,6 +703,7 @@ function onKeyDown(e) {
             userAction: true,
         });
     } else if (e.key === "PageDown") {
+        collapseTopicDetails();
         const visible = Math.max(
             1,
             Math.floor(listEl.clientHeight / 48),
@@ -515,8 +712,10 @@ function onKeyDown(e) {
             userAction: true,
         });
     } else if (e.key === "Home") {
+        collapseTopicDetails();
         setSelectedIndex(0, { userAction: true });
     } else if (e.key === "End") {
+        collapseTopicDetails();
         setSelectedIndex(filteredTopics.length - 1, { userAction: true });
     }
 }
@@ -570,6 +769,9 @@ function handleSearch() {
         clearSearchBtn.style.display = 'none';
     }
     
+    // Collapse details when searching
+    collapseTopicDetails();
+    
     // Filter and re-render
     filterTopics();
     selectedIndex = filteredTopics.length > 0 ? 0 : -1;
@@ -618,6 +820,103 @@ function switchTab(tabName) {
 }
 
 // ======= Node Browser Functions =======
+// Fetch detailed information about a node
+async function fetchNodeDetails(nodeName, forceRefresh = false) {
+    if (!forceRefresh && nodeDetailsCache[nodeName]) {
+        return nodeDetailsCache[nodeName];
+    }
+    
+    try {
+        const response = await fetch(`/api/node_info/${encodeURIComponent(nodeName)}`, { cache: "no-store" });
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const data = await response.json();
+        nodeDetailsCache[nodeName] = data;
+        return data;
+    } catch (err) {
+        console.error("Failed to fetch node details:", err);
+        return null;
+    }
+}
+
+// Update the expanded node details without full re-render
+function updateExpandedNodeDetails() {
+    if (expandedNodeIndex < 0 || expandedNodeIndex >= filteredNodes.length) return;
+    
+    const n = filteredNodes[expandedNodeIndex];
+    const details = nodeDetailsCache[n.full_name];
+    if (!details) return;
+    
+    // Find the details element in the DOM
+    const detailsEl = nodeListEl.querySelector('.node-details');
+    if (!detailsEl) return;
+    
+    // Update the details content
+    detailsEl.innerHTML = `
+        <div class="details-section">
+            <div class="details-header">Node Information</div>
+            <div class="details-grid">
+                <div class="detail-item">
+                    <span class="detail-label">Full Name:</span>
+                    <span class="detail-value monospace">${details.full_name || 'N/A'}</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Publishers:</span>
+                    <span class="detail-value">${details.publishers?.length || 0}</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Subscribers:</span>
+                    <span class="detail-value">${details.subscribers?.length || 0}</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Services:</span>
+                    <span class="detail-value">${details.services?.length || 0}</span>
+                </div>
+            </div>
+            ${details.publishers && details.publishers.length > 0 ? `
+                <div class="details-subheader">Published Topics</div>
+                <div class="details-list">
+                    ${details.publishers.map(p => `
+                        <div class="list-item">
+                            <span class="monospace topic-name">${p.topic}</span>
+                            <span class="topic-type">${p.type}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
+            ${details.subscribers && details.subscribers.length > 0 ? `
+                <div class="details-subheader">Subscribed Topics</div>
+                <div class="details-list">
+                    ${details.subscribers.map(s => `
+                        <div class="list-item">
+                            <span class="monospace topic-name">${s.topic}</span>
+                            <span class="topic-type">${s.type}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
+            ${details.services && details.services.length > 0 ? `
+                <div class="details-subheader">Services</div>
+                <div class="details-list">
+                    ${details.services.map(svc => `
+                        <div class="list-item">
+                            <span class="monospace topic-name">${svc.name}</span>
+                            <span class="topic-type">${svc.type}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+// Collapse expanded node
+function collapseNodeDetails() {
+    if (expandedNodeIndex >= 0) {
+        expandedNodeIndex = -1;
+        renderNodeList();
+    }
+}
+
 function filterNodes() {
     if (nodeSearchQuery) {
         filteredNodes = nodes.filter(n => 
@@ -658,7 +957,18 @@ async function fetchNodesOnce() {
             selectedNodeIndex = -1;
         }
         
-        renderNodeList();
+        // If details are expanded, don't re-render to avoid flashing
+        if (expandedNodeIndex >= 0) {
+            // Refresh the expanded node details
+            const expandedNode = filteredNodes[expandedNodeIndex];
+            if (expandedNode) {
+                await fetchNodeDetails(expandedNode.full_name, true); // Force refresh
+                // Re-render just the details section
+                updateExpandedNodeDetails();
+            }
+        } else {
+            renderNodeList();
+        }
     } catch (err) {
         console.error("Failed to fetch nodes:", err);
         nodeEmptyEl.textContent = "Error: " + (err.message || err);
@@ -704,9 +1014,113 @@ function renderNodeList() {
         
         item.addEventListener("click", () => {
             setSelectedNodeIndex(i, { userAction: true });
+            // Always collapse details on single click
+            if (expandedNodeIndex >= 0) {
+                collapseNodeDetails();
+            }
+        });
+        
+        // double-click -> expand details
+        item.addEventListener("dblclick", async (e) => {
+            e.preventDefault();
+            if (expandedNodeIndex === i) {
+                // Already expanded, collapse it
+                collapseNodeDetails();
+            } else {
+                // Expand this item
+                expandedNodeIndex = i;
+                setSelectedNodeIndex(i, { userAction: false });
+                renderNodeList(); // Re-render to show loading
+                
+                // Fetch details
+                const details = await fetchNodeDetails(n.full_name);
+                if (details && expandedNodeIndex === i) {
+                    // Still expanded, render with details
+                    renderNodeList();
+                }
+            }
         });
         
         nodeListEl.appendChild(item);
+        
+        // Add expanded details section if this is the expanded item
+        if (i === expandedNodeIndex) {
+            const detailsRow = document.createElement("div");
+            detailsRow.className = "node-details";
+            
+            // Prevent clicks inside details from bubbling up
+            detailsRow.addEventListener("click", (e) => {
+                e.stopPropagation();
+            });
+            
+            const details = nodeDetailsCache[n.full_name];
+            if (details) {
+                detailsRow.innerHTML = `
+                    <div class="details-section">
+                        <div class="details-header">Node Information</div>
+                        <div class="details-grid">
+                            <div class="detail-item">
+                                <span class="detail-label">Full Name:</span>
+                                <span class="detail-value monospace">${details.full_name || 'N/A'}</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Publishers:</span>
+                                <span class="detail-value">${details.publishers?.length || 0}</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Subscribers:</span>
+                                <span class="detail-value">${details.subscribers?.length || 0}</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Services:</span>
+                                <span class="detail-value">${details.services?.length || 0}</span>
+                            </div>
+                        </div>
+                        ${details.publishers && details.publishers.length > 0 ? `
+                            <div class="details-subheader">Published Topics</div>
+                            <div class="details-list">
+                                ${details.publishers.map(p => `
+                                    <div class="list-item">
+                                        <span class="monospace topic-name">${p.topic}</span>
+                                        <span class="topic-type">${p.type}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                        ${details.subscribers && details.subscribers.length > 0 ? `
+                            <div class="details-subheader">Subscribed Topics</div>
+                            <div class="details-list">
+                                ${details.subscribers.map(s => `
+                                    <div class="list-item">
+                                        <span class="monospace topic-name">${s.topic}</span>
+                                        <span class="topic-type">${s.type}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                        ${details.services && details.services.length > 0 ? `
+                            <div class="details-subheader">Services</div>
+                            <div class="details-list">
+                                ${details.services.map(svc => `
+                                    <div class="list-item">
+                                        <span class="monospace topic-name">${svc.name}</span>
+                                        <span class="topic-type">${svc.type}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            } else {
+                detailsRow.innerHTML = `
+                    <div class="details-section">
+                        <div class="details-loading">Loading details...</div>
+                    </div>
+                `;
+            }
+            
+            nodeListEl.appendChild(detailsRow);
+        }
     });
     
     ensureSelectedNodeInView();
@@ -735,21 +1149,27 @@ function onNodeKeyDown(e) {
     if (!filteredNodes.length) return;
     
     if (e.key === "ArrowUp") {
+        collapseNodeDetails();
         setSelectedNodeIndex(selectedNodeIndex <= 0 ? 0 : selectedNodeIndex - 1, { userAction: true });
     } else if (e.key === "ArrowDown") {
+        collapseNodeDetails();
         setSelectedNodeIndex(
             selectedNodeIndex >= filteredNodes.length - 1 ? filteredNodes.length - 1 : selectedNodeIndex + 1,
             { userAction: true }
         );
     } else if (e.key === "PageUp") {
+        collapseNodeDetails();
         const visible = Math.max(1, Math.floor(nodeListEl.clientHeight / 48));
         setSelectedNodeIndex(selectedNodeIndex - visible, { userAction: true });
     } else if (e.key === "PageDown") {
+        collapseNodeDetails();
         const visible = Math.max(1, Math.floor(nodeListEl.clientHeight / 48));
         setSelectedNodeIndex(selectedNodeIndex + visible, { userAction: true });
     } else if (e.key === "Home") {
+        collapseNodeDetails();
         setSelectedNodeIndex(0, { userAction: true });
     } else if (e.key === "End") {
+        collapseNodeDetails();
         setSelectedNodeIndex(filteredNodes.length - 1, { userAction: true });
     }
 }
@@ -799,6 +1219,9 @@ function handleNodeSearch() {
         nodeClearSearchBtn.style.display = 'none';
     }
     
+    // Collapse details when searching
+    collapseNodeDetails();
+    
     filterNodes();
     selectedNodeIndex = filteredNodes.length > 0 ? 0 : -1;
     renderNodeList();
@@ -830,6 +1253,7 @@ refreshBtn.addEventListener("click", () => fetchTopicsOnce());
 // Monitored toggle button (checkbox)
 monitoredToggleBtn.addEventListener("change", () => {
     showMonitoredOnly = monitoredToggleBtn.checked;
+    collapseTopicDetails(); // Collapse details when filtering
     filterTopics();
     selectedIndex = filteredTopics.length > 0 ? 0 : -1;
     renderList();
