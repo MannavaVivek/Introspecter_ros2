@@ -41,6 +41,55 @@ h1 {
     margin: 0 0 16px 0;
     font-size: 20px;
 }
+/* Tabs */
+.tabs-container {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 0;
+}
+.tab {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-size: 16px;
+    font-weight: 500;
+    padding: 12px 24px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    font-family: inherit;
+    position: relative;
+}
+.tab:hover {
+    color: var(--white);
+    background: rgba(255, 255, 255, 0.02);
+}
+.tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+.tab.active::after {
+    content: "";
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+}
+/* Tab content */
+.tab-content {
+    display: none;
+}
+.tab-content.active {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
 .search-container {
     position: relative;
     margin-bottom: 16px;
@@ -389,4 +438,64 @@ h1 {
 .list:focus {
     box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.08);
     outline: none;
+}
+/* Node Browser Styles */
+.node-header {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 8px 12px;
+    margin: 6px 6px 2px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--accent);
+    border-bottom: 1px solid rgba(6, 182, 212, 0.15);
+    position: sticky;
+    top: 0;
+    background: var(--card);
+    z-index: 10;
+}
+.node-header .header-cell {
+    display: flex;
+    align-items: center;
+}
+.node {
+    padding: 10px 12px;
+    border-radius: 6px;
+    margin: 6px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    user-select: none;
+}
+.node:hover {
+    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.02);
+}
+.node.selected {
+    outline: 2px solid rgba(6, 182, 212, 0.18);
+    background: var(--highlight);
+    box-shadow: 0 4px 14px rgba(6, 182, 212, 0.06);
+}
+.node-name {
+    font-family: monospace;
+    color: var(--white);
+    font-size: 14px;
+}
+.node-namespace {
+    font-family: monospace;
+    color: var(--muted);
+    font-size: 13px;
+}
+/* Footer */
+.page-footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 14px;
+    padding: 16px 0;
+    margin-top: 8px;
 }

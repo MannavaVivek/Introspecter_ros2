@@ -2,64 +2,104 @@
 <html lang="en">
     <head>
         <meta charset="utf-8" />
-        <title>ROS2 Topic Browser</title>
+        <title>ROS2 Browser</title>
         <meta name="viewport" content="width=device-width,initial-scale=1" />
     <link rel="stylesheet" href="/static/styles.css">
     </head>
     <body>
         <div class="app" role="application" aria-labelledby="title">
-            <h1 id="title">ROS2 Topic Browser</h1>
+            <div class="tabs-container">
+                <button class="tab active" data-tab="topics">ROS2 Topic Browser</button>
+                <button class="tab" data-tab="nodes">ROS2 Node Browser</button>
+            </div>
             
-            <div class="search-container" id="searchContainer">
-                <button id="searchToggle" class="search-toggle-button" title="Search topics">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="11" cy="11" r="8"></circle>
-                        <path d="m21 21-4.35-4.35"></path>
-                    </svg>
-                </button>
-                <input 
-                    type="text" 
-                    id="searchInput" 
-                    class="search-input collapsed" 
-                    placeholder="Search topics..."
-                    autocomplete="off"
-                />
-                <button id="clearSearch" class="clear-button" style="display: none;" title="Clear search">✕</button>
-                <span class="toggle-label">Filter monitored:</span>
-                <label class="cl-toggle-switch" title="Show monitored topics only">
-                    <div class="cl-switch">
-                        <input type="checkbox" id="monitoredToggle" />
-                        <span></span>
-                    </div>
-                </label>
+            <!-- Topics Tab Content -->
+            <div class="tab-content active" id="topicsTab">
+                <div class="search-container" id="searchContainer">
+                    <button id="searchToggle" class="search-toggle-button" title="Search topics">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <path d="m21 21-4.35-4.35"></path>
+                        </svg>
+                    </button>
+                    <input 
+                        type="text" 
+                        id="searchInput" 
+                        class="search-input collapsed" 
+                        placeholder="Search topics..."
+                        autocomplete="off"
+                    />
+                    <button id="clearSearch" class="clear-button" style="display: none;" title="Clear search">✕</button>
+                    <span class="toggle-label">Filter monitored:</span>
+                    <label class="cl-toggle-switch" title="Show monitored topics only">
+                        <div class="cl-switch">
+                            <input type="checkbox" id="monitoredToggle" />
+                            <span></span>
+                        </div>
+                    </label>
+                </div>
+
+                <div class="controls">
+                    <label>
+                        Poll interval:
+                        <select id="pollInterval">
+                            <option value="500">500ms</option>
+                            <option value="1000" selected>1s</option>
+                            <option value="2000">2s</option>
+                            <option value="5000">5s</option>
+                        </select>
+                    </label>
+                    <button id="refreshBtn" title="Force refresh">Refresh</button>
+                    <div class="status" id="status">idle</div>
+                </div>
+
+                <div
+                    id="list"
+                    class="list"
+                    tabindex="0"
+                    role="listbox"
+                    aria-label="ROS2 topics"
+                >
+                    <div class="empty" id="empty">Loading topics…</div>
+                </div>
+
+                <div class="hint">
+                    Use <strong>↑</strong>/<strong>↓</strong> to navigate • Press <strong>Space</strong> to toggle monitoring • Press <strong>Enter</strong> to edit expected rate.
+                </div>
             </div>
 
-            <div class="controls">
-                <label>
-                    Poll interval:
-                    <select id="pollInterval">
-                        <option value="500">500ms</option>
-                        <option value="1000" selected>1s</option>
-                        <option value="2000">2s</option>
-                        <option value="5000">5s</option>
-                    </select>
-                </label>
-                <button id="refreshBtn" title="Force refresh">Refresh</button>
-                <div class="status" id="status">idle</div>
-            </div>
+            <!-- Nodes Tab Content -->
+            <div class="tab-content" id="nodesTab">
+                <div class="search-container" id="nodeSearchContainer">
+                    <button id="nodeSearchToggle" class="search-toggle-button" title="Search nodes">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <path d="m21 21-4.35-4.35"></path>
+                        </svg>
+                    </button>
+                    <input 
+                        type="text" 
+                        id="nodeSearchInput" 
+                        class="search-input collapsed" 
+                        placeholder="Search nodes..."
+                        autocomplete="off"
+                    />
+                    <button id="nodeClearSearch" class="clear-button" style="display: none;" title="Clear search">✕</button>
+                </div>
 
-            <div
-                id="list"
-                class="list"
-                tabindex="0"
-                role="listbox"
-                aria-label="ROS2 topics"
-            >
-                <div class="empty" id="empty">Loading topics…</div>
-            </div>
+                <div
+                    id="nodeList"
+                    class="list"
+                    tabindex="0"
+                    role="listbox"
+                    aria-label="ROS2 nodes"
+                >
+                    <div class="empty" id="nodeEmpty">Loading nodes…</div>
+                </div>
 
-            <div class="hint">
-                Use <strong>↑</strong>/<strong>↓</strong> to navigate • Press <strong>Space</strong> to toggle monitoring • Press <strong>Enter</strong> to edit expected rate.
+                <div class="hint">
+                    Use <strong>↑</strong>/<strong>↓</strong> to navigate
+                </div>
             </div>
         </div>
 

@@ -391,3 +391,37 @@ def get_monitors():
             "msg_rate_hz": r.get("msg_rate_hz", 0),
         }
     return JSONResponse(data)
+
+
+@app.get("/api/nodes")
+def get_nodes():
+    """Return list of ROS2 nodes with their namespaces."""
+    global node
+    if node is None:
+        return JSONResponse({"error": "ROS2 node not initialized"}, status_code=500)
+    
+    try:
+        nodes_with_ns = node.get_node_names_and_namespaces()
+        
+        result = []
+        for name, namespace in nodes_with_ns:
+            # Filter out internal ROS2 nodes (CLI daemon, etc.)
+            if name.startswith('_ros2cli'):
+                continue
+            
+            full_name = f"{namespace}/{name}" if namespace != "/" else f"/{name}"
+            full_name = full_name.replace("//", "/")
+            
+            result.append({
+                "name": name,
+                "namespace": namespace,
+                "full_name": full_name,
+            })
+        
+        # Sort by full name
+        result.sort(key=lambda x: x["full_name"])
+        
+        return JSONResponse(result)
+    except Exception as e:
+        logging.getLogger('topic_list_node').exception("Failed to get nodes")
+        return JSONResponse({"error": f"Failed to get nodes: {e}"}, status_code=500)

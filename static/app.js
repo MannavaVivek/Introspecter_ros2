@@ -7,8 +7,10 @@
 // Use a relative URL so the browser won't trigger CORS when the frontend is
 // served from the same host/port (127.0.0.1 vs localhost differences).
 const API_URL = "/api/topics"; // change if your backend uses another path or host
+const NODES_API_URL = "/api/nodes"; // API endpoint for nodes
 
 // ======= State =======
+let currentTab = "topics"; // current active tab
 let topics = []; // array of strings
 let filteredTopics = []; // filtered based on search
 let selectedIndex = -1;
@@ -18,6 +20,13 @@ let expectedRates = {}; // store expected rates per topic: { "topic_name": expec
 let editingRateIndex = -1; // index of topic currently being edited
 let isInputRendered = false; // track if input is currently rendered
 let showMonitoredOnly = false; // filter to show only monitored topics
+
+// Node browser state
+let nodes = []; // array of node objects
+let filteredNodes = []; // filtered based on search
+let selectedNodeIndex = -1;
+let nodeSearchQuery = "";
+let nodesPollTimer = null;
 
 const listEl = document.getElementById("list");
 const statusEl = document.getElementById("status");
@@ -29,6 +38,14 @@ const clearSearchBtn = document.getElementById("clearSearch");
 const searchToggleBtn = document.getElementById("searchToggle");
 const monitoredToggleBtn = document.getElementById("monitoredToggle");
 let isSearchExpanded = false;
+
+// Node browser DOM elements
+const nodeListEl = document.getElementById("nodeList");
+const nodeEmptyEl = document.getElementById("nodeEmpty");
+const nodeSearchInput = document.getElementById("nodeSearchInput");
+const nodeClearSearchBtn = document.getElementById("nodeClearSearch");
+const nodeSearchToggleBtn = document.getElementById("nodeSearchToggle");
+let isNodeSearchExpanded = false;
 
 // ======= Helpers =======
 function setStatus(s) {
@@ -569,7 +586,243 @@ function clearSearch() {
     searchInput.focus();
 }
 
+// ======= Tab Switching =======
+function switchTab(tabName) {
+    currentTab = tabName;
+    
+    // Update tab buttons
+    document.querySelectorAll('.tab').forEach(tab => {
+        if (tab.dataset.tab === tabName) {
+            tab.classList.add('active');
+        } else {
+            tab.classList.remove('active');
+        }
+    });
+    
+    // Update tab content
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    
+    if (tabName === 'topics') {
+        document.getElementById('topicsTab').classList.add('active');
+        stopNodesPolling();
+        startPolling();
+        listEl.focus();
+    } else if (tabName === 'nodes') {
+        document.getElementById('nodesTab').classList.add('active');
+        stopPolling();
+        startNodesPolling();
+        nodeListEl.focus();
+    }
+}
+
+// ======= Node Browser Functions =======
+function filterNodes() {
+    if (nodeSearchQuery) {
+        filteredNodes = nodes.filter(n => 
+            n.full_name.toLowerCase().includes(nodeSearchQuery.toLowerCase()) ||
+            n.name.toLowerCase().includes(nodeSearchQuery.toLowerCase())
+        );
+    } else {
+        filteredNodes = nodes;
+    }
+    
+    // Reset selection when filter changes
+    if (selectedNodeIndex >= filteredNodes.length) {
+        selectedNodeIndex = filteredNodes.length > 0 ? 0 : -1;
+    }
+}
+
+async function fetchNodesOnce() {
+    try {
+        const r = await fetch(NODES_API_URL, { cache: "no-store" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const data = await r.json();
+        
+        if (Array.isArray(data)) {
+            nodes = data;
+        } else {
+            nodes = [];
+        }
+        
+        // Apply filter
+        filterNodes();
+        
+        // Keep selection anchored if possible
+        if (selectedNodeIndex >= 0 && filteredNodes.length > 0) {
+            selectedNodeIndex = clamp(selectedNodeIndex, 0, filteredNodes.length - 1);
+        } else if (filteredNodes.length > 0) {
+            selectedNodeIndex = 0;
+        } else {
+            selectedNodeIndex = -1;
+        }
+        
+        renderNodeList();
+    } catch (err) {
+        console.error("Failed to fetch nodes:", err);
+        nodeEmptyEl.textContent = "Error: " + (err.message || err);
+        nodeListEl.innerHTML = "";
+        nodeListEl.appendChild(nodeEmptyEl);
+    }
+}
+
+function renderNodeList() {
+    nodeListEl.innerHTML = "";
+    
+    if (!filteredNodes.length) {
+        nodeEmptyEl.textContent = nodeSearchQuery ? `No nodes matching "${nodeSearchQuery}"` : "No nodes found";
+        nodeListEl.appendChild(nodeEmptyEl);
+        return;
+    }
+    
+    // Add column headers
+    const header = document.createElement("div");
+    header.className = "node-header";
+    header.innerHTML = `
+        <div class="header-cell">Node Name</div>
+        <div class="header-cell">Namespace</div>
+    `;
+    nodeListEl.appendChild(header);
+    
+    filteredNodes.forEach((n, i) => {
+        const item = document.createElement("div");
+        item.className = "node" + (i === selectedNodeIndex ? " selected" : "");
+        item.setAttribute("role", "option");
+        item.setAttribute("aria-selected", String(i === selectedNodeIndex));
+        
+        const name = document.createElement("div");
+        name.className = "node-name";
+        name.textContent = n.name;
+        
+        const namespace = document.createElement("div");
+        namespace.className = "node-namespace";
+        namespace.textContent = n.namespace;
+        
+        item.appendChild(name);
+        item.appendChild(namespace);
+        
+        item.addEventListener("click", () => {
+            setSelectedNodeIndex(i, { userAction: true });
+        });
+        
+        nodeListEl.appendChild(item);
+    });
+    
+    ensureSelectedNodeInView();
+}
+
+function ensureSelectedNodeInView() {
+    if (selectedNodeIndex < 0) return;
+    const children = nodeListEl.children;
+    if (!children || !children[selectedNodeIndex + 1]) return; // +1 to account for header
+    const node = children[selectedNodeIndex + 1];
+    node.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+function setSelectedNodeIndex(i, opts = {}) {
+    if (!filteredNodes.length) return;
+    selectedNodeIndex = clamp(i, 0, filteredNodes.length - 1);
+    renderNodeList();
+    ensureSelectedNodeInView();
+    const node = filteredNodes[selectedNodeIndex];
+    console.log("Selected node:", node);
+}
+
+function onNodeKeyDown(e) {
+    if (!["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(e.key)) return;
+    e.preventDefault();
+    if (!filteredNodes.length) return;
+    
+    if (e.key === "ArrowUp") {
+        setSelectedNodeIndex(selectedNodeIndex <= 0 ? 0 : selectedNodeIndex - 1, { userAction: true });
+    } else if (e.key === "ArrowDown") {
+        setSelectedNodeIndex(
+            selectedNodeIndex >= filteredNodes.length - 1 ? filteredNodes.length - 1 : selectedNodeIndex + 1,
+            { userAction: true }
+        );
+    } else if (e.key === "PageUp") {
+        const visible = Math.max(1, Math.floor(nodeListEl.clientHeight / 48));
+        setSelectedNodeIndex(selectedNodeIndex - visible, { userAction: true });
+    } else if (e.key === "PageDown") {
+        const visible = Math.max(1, Math.floor(nodeListEl.clientHeight / 48));
+        setSelectedNodeIndex(selectedNodeIndex + visible, { userAction: true });
+    } else if (e.key === "Home") {
+        setSelectedNodeIndex(0, { userAction: true });
+    } else if (e.key === "End") {
+        setSelectedNodeIndex(filteredNodes.length - 1, { userAction: true });
+    }
+}
+
+function startNodesPolling() {
+    stopNodesPolling();
+    const ms = Number(pollIntervalSelect.value) || 1000;
+    nodesPollTimer = setInterval(fetchNodesOnce, ms);
+    fetchNodesOnce();
+}
+
+function stopNodesPolling() {
+    if (nodesPollTimer) {
+        clearInterval(nodesPollTimer);
+        nodesPollTimer = null;
+    }
+}
+
+function expandNodeSearch() {
+    isNodeSearchExpanded = true;
+    nodeSearchInput.classList.remove('collapsed');
+    nodeSearchInput.classList.add('expanded');
+    nodeSearchToggleBtn.classList.add('hidden');
+    setTimeout(() => nodeSearchInput.focus(), 100);
+}
+
+function collapseNodeSearch() {
+    isNodeSearchExpanded = false;
+    nodeSearchInput.classList.remove('expanded');
+    nodeSearchInput.classList.add('collapsed');
+    nodeSearchToggleBtn.classList.remove('hidden');
+    nodeSearchInput.value = '';
+    nodeSearchQuery = '';
+    nodeClearSearchBtn.style.display = 'none';
+    filterNodes();
+    selectedNodeIndex = filteredNodes.length > 0 ? 0 : -1;
+    renderNodeList();
+    nodeListEl.focus();
+}
+
+function handleNodeSearch() {
+    nodeSearchQuery = nodeSearchInput.value;
+    
+    if (nodeSearchQuery) {
+        nodeClearSearchBtn.style.display = 'flex';
+    } else {
+        nodeClearSearchBtn.style.display = 'none';
+    }
+    
+    filterNodes();
+    selectedNodeIndex = filteredNodes.length > 0 ? 0 : -1;
+    renderNodeList();
+}
+
+function clearNodeSearch() {
+    nodeSearchInput.value = '';
+    nodeSearchQuery = '';
+    nodeClearSearchBtn.style.display = 'none';
+    filterNodes();
+    selectedNodeIndex = filteredNodes.length > 0 ? 0 : -1;
+    renderNodeList();
+    nodeSearchInput.focus();
+}
+
 // ======= Wire up events =======
+// Tab switching
+document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        switchTab(tab.dataset.tab);
+    });
+});
+
+// Topic browser events
 listEl.addEventListener("keydown", onKeyDown);
 pollIntervalSelect.addEventListener("change", startPolling);
 refreshBtn.addEventListener("click", () => fetchTopicsOnce());
@@ -639,4 +892,45 @@ document.body.addEventListener("click", (e) => {
     if (!listEl.contains(e.target)) return;
     // keep focus on list so arrow keys continue to work
     listEl.focus();
+});
+
+// ======= Node Browser Event Listeners =======
+nodeListEl.addEventListener("keydown", onNodeKeyDown);
+
+// Node search toggle button
+nodeSearchToggleBtn.addEventListener("click", () => {
+    expandNodeSearch();
+});
+
+// Node search input events
+nodeSearchInput.addEventListener("input", handleNodeSearch);
+nodeClearSearchBtn.addEventListener("click", clearNodeSearch);
+
+// Allow arrow keys in node search input to control list navigation
+nodeSearchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+        e.preventDefault();
+        collapseNodeSearch();
+    } else if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(e.key)) {
+        e.preventDefault();
+        onNodeKeyDown(e);
+    }
+});
+
+// Global escape handler to collapse node search when expanded
+document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && isNodeSearchExpanded) {
+        e.preventDefault();
+        collapseNodeSearch();
+    }
+});
+
+// Click outside to collapse node search
+document.addEventListener("click", (e) => {
+    if (isNodeSearchExpanded) {
+        const nodeSearchContainer = document.getElementById("nodeSearchContainer");
+        if (!nodeSearchContainer.contains(e.target)) {
+            collapseNodeSearch();
+        }
+    }
 });
