@@ -14,6 +14,9 @@ let filteredTopics = []; // filtered based on search
 let selectedIndex = -1;
 let pollTimer = null;
 let searchQuery = "";
+let expectedRates = {}; // store expected rates per topic: { "topic_name": expectedHz }
+let editingRateIndex = -1; // index of topic currently being edited
+let isInputRendered = false; // track if input is currently rendered
 
 const listEl = document.getElementById("list");
 const statusEl = document.getElementById("status");
@@ -29,6 +32,62 @@ function setStatus(s) {
 }
 function clamp(i, min, max) {
     return Math.max(min, Math.min(max, i));
+}
+
+// Update only the rate values without full re-render (when editing)
+function updateRatesOnly() {
+    const topicElements = listEl.querySelectorAll('.topic');
+    topicElements.forEach((topicEl, idx) => {
+        // Note: idx corresponds to the filteredTopics array index
+        if (idx === editingRateIndex) return; // Skip the one being edited
+        const t = filteredTopics[idx];
+        if (!t) return;
+        
+        // Update rate display
+        const rateEl = topicEl.querySelector('.meta.rate');
+        if (rateEl) {
+            rateEl.textContent = t.monitored ? `${Number(t.msg_rate_hz).toFixed(1)} Hz` : "";
+        }
+        
+        // Update badge
+        const badgeEl = topicEl.querySelector('.badge');
+        if (badgeEl) {
+            badgeEl.textContent = t.monitored ? "monitored" : "";
+        }
+        
+        // Update expected rate color if exists
+        const expectedRateEl = topicEl.querySelector('.expected-rate');
+        if (expectedRateEl && !expectedRateEl.querySelector('.expected-rate-input')) {
+            if (expectedRates[t.topic] !== undefined) {
+                const expectedHz = expectedRates[t.topic];
+                const actualHz = t.msg_rate_hz || 0;
+                
+                // Color coding only when monitored and has actual rate
+                let colorClass = "";
+                if (t.monitored && actualHz > 0) {
+                    const tolerance = expectedHz * 0.1;
+                    if (Math.abs(actualHz - expectedHz) <= tolerance) {
+                        colorClass = "within-tolerance";
+                    } else {
+                        colorClass = "out-of-tolerance";
+                    }
+                }
+                
+                expectedRateEl.className = `expected-rate ${colorClass}`;
+                expectedRateEl.textContent = `${expectedHz.toFixed(1)} Hz`;
+            } else {
+                // Hide if no expected rate set
+                expectedRateEl.textContent = "";
+            }
+        }
+        
+        // Update monitored class
+        if (t.monitored) {
+            topicEl.classList.add('monitored');
+        } else {
+            topicEl.classList.remove('monitored');
+        }
+    });
 }
 
 // Filter topics based on search query
@@ -103,6 +162,13 @@ async function fetchTopicsOnce() {
         // update state
         topics = normalized;
         
+        // Load expected rates from backend data
+        topics.forEach(t => {
+            if (t.expected_rate_hz !== null && t.expected_rate_hz !== undefined) {
+                expectedRates[t.topic] = t.expected_rate_hz;
+            }
+        });
+        
         // Apply search filter
         filterTopics();
         
@@ -125,6 +191,16 @@ async function fetchTopicsOnce() {
 
 // ======= UI Rendering =======
 function renderList() {
+    // Don't re-render if input is already shown to avoid closing it
+    if (isInputRendered && editingRateIndex >= 0 && editingRateIndex < filteredTopics.length) {
+        // Only update rates without full re-render
+        updateRatesOnly();
+        return;
+    }
+    
+    // Reset the flag since we're doing a full render
+    isInputRendered = false;
+    
     listEl.innerHTML = "";
     if (!filteredTopics.length) {
         emptyEl.textContent = searchQuery ? `No topics matching "${searchQuery}"` : "No topics found";
@@ -139,6 +215,7 @@ function renderList() {
         <div class="header-cell">Topic Name</div>
         <div class="header-cell">Status</div>
         <div class="header-cell">Rate</div>
+        <div class="header-cell">Expected Rate</div>
     `;
     listEl.appendChild(header);
 
@@ -163,9 +240,128 @@ function renderList() {
         rate.className = "meta rate";
         rate.textContent = t.monitored ? `${Number(t.msg_rate_hz).toFixed(1)} Hz` : "";
 
+        // Expected rate column
+        const expectedRateCell = document.createElement("div");
+        expectedRateCell.className = "expected-rate";
+        
+        if (i === editingRateIndex) {
+            // Store the previous value for cancel
+            const previousValue = expectedRates[t.topic];
+            
+            // Show input field
+            const input = document.createElement("input");
+            input.type = "number";
+            input.className = "expected-rate-input";
+            input.placeholder = "Enter Hz";
+            input.value = expectedRates[t.topic] || "";
+            input.step = "0.1";
+            input.min = "0";
+            
+            // Handle input submission
+            const handleSubmit = () => {
+                const val = parseFloat(input.value);
+                const topicEnc = encodeURIComponent(t.topic);
+                
+                if (!isNaN(val) && val > 0) {
+                    expectedRates[t.topic] = val;
+                    // Save to backend
+                    fetch(`/api/expected_rate/${topicEnc}?expected_rate_hz=${val}`, { method: 'PUT' })
+                        .catch((err) => console.error('Failed to save expected rate', err));
+                } else if (input.value === "") {
+                    delete expectedRates[t.topic];
+                    // Delete from backend
+                    fetch(`/api/expected_rate/${topicEnc}`, { method: 'DELETE' })
+                        .catch((err) => console.error('Failed to delete expected rate', err));
+                }
+                editingRateIndex = -1;
+                isInputRendered = false;
+                renderList();
+                // Return focus to list for keyboard navigation
+                setTimeout(() => listEl.focus(), 0);
+            };
+            
+            // Handle cancel (restore previous value)
+            const handleCancel = () => {
+                // Restore previous value
+                if (previousValue !== undefined) {
+                    expectedRates[t.topic] = previousValue;
+                } else {
+                    delete expectedRates[t.topic];
+                }
+                editingRateIndex = -1;
+                isInputRendered = false;
+                renderList();
+                // Return focus to list for keyboard navigation
+                setTimeout(() => listEl.focus(), 0);
+            };
+            
+            input.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleSubmit();
+                } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleCancel();
+                } else {
+                    // Stop other key events from propagating
+                    e.stopPropagation();
+                }
+            });
+            
+            // Handle blur to close input
+            input.addEventListener("blur", () => {
+                // Small delay to allow clicking on other UI elements
+                setTimeout(() => {
+                    if (editingRateIndex === i) {
+                        handleCancel();
+                    }
+                }, 100);
+            });
+            
+            // Prevent click from propagating
+            input.addEventListener("click", (e) => {
+                e.stopPropagation();
+            });
+            
+            expectedRateCell.appendChild(input);
+            
+            // Mark that input is now rendered
+            isInputRendered = true;
+            
+            // Auto-focus the input after render
+            setTimeout(() => {
+                input.focus();
+                input.select();
+            }, 50);
+        } else if (expectedRates[t.topic] !== undefined) {
+            // Show expected rate if set (regardless of monitoring status)
+            const expectedHz = expectedRates[t.topic];
+            const actualHz = t.msg_rate_hz || 0;
+            
+            // Check if within 10% tolerance (only if monitored and has actual rate)
+            let colorClass = "";
+            if (t.monitored && actualHz > 0) {
+                const tolerance = expectedHz * 0.1;
+                if (Math.abs(actualHz - expectedHz) <= tolerance) {
+                    colorClass = "within-tolerance";
+                } else {
+                    colorClass = "out-of-tolerance";
+                }
+            }
+            
+            expectedRateCell.className = `expected-rate ${colorClass}`;
+            expectedRateCell.textContent = `${expectedHz.toFixed(1)} Hz`;
+        } else {
+            // Empty cell (no expected rate set)
+            expectedRateCell.textContent = "";
+        }
+
         item.appendChild(name);
         item.appendChild(badge);
         item.appendChild(rate);
+        item.appendChild(expectedRateCell);
 
         // click -> select and log
         item.addEventListener("click", () => {
@@ -208,6 +404,7 @@ function onKeyDown(e) {
             "ArrowUp",
             "ArrowDown",
             "Enter",
+            " ",
             "PageUp",
             "PageDown",
             "Home",
@@ -219,7 +416,9 @@ function onKeyDown(e) {
     if (!filteredTopics.length) return;
     // print the key pressed to console
     console.log(`Key pressed: ${e.key}`);
-    if (e.key === 'Enter') {
+    
+    // Space bar toggles monitoring
+    if (e.key === ' ') {
         e.preventDefault();
         const t = filteredTopics[selectedIndex];
         if (!t) return;
@@ -244,6 +443,16 @@ function onKeyDown(e) {
                     fetchTopicsOnce();
                 });
         }
+        return;
+    }
+    
+    // Enter key opens expected rate input
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        const t = filteredTopics[selectedIndex];
+        if (!t) return;
+        editingRateIndex = selectedIndex;
+        renderList();
         return;
     }
     if (e.key === "ArrowUp") {
@@ -340,7 +549,7 @@ searchInput.addEventListener("keydown", (e) => {
         if (searchQuery) {
             clearSearch();
         }
-    } else if (["ArrowUp", "ArrowDown", "Enter", "PageUp", "PageDown", "Home", "End"].includes(e.key)) {
+    } else if (["ArrowUp", "ArrowDown", "Enter", " ", "PageUp", "PageDown", "Home", "End"].includes(e.key)) {
         e.preventDefault();
         onKeyDown(e);
     }

@@ -108,8 +108,8 @@ h1 {
 }
 .topic-header {
     display: grid;
-    grid-template-columns: minmax(200px, 1fr) 120px 120px;
-    gap: 16px;
+    grid-template-columns: minmax(200px, 1fr) 110px 100px 120px;
+    gap: 12px;
     padding: 8px 12px;
     margin: 6px 6px 2px 6px;
     font-size: 11px;
@@ -128,7 +128,8 @@ h1 {
     align-items: center;
 }
 .topic-header .header-cell:nth-child(2),
-.topic-header .header-cell:nth-child(3) {
+.topic-header .header-cell:nth-child(3),
+.topic-header .header-cell:nth-child(4) {
     justify-content: center;
 }
 .topic {
@@ -136,9 +137,9 @@ h1 {
     border-radius: 6px;
     margin: 6px;
     display: grid;
-    grid-template-columns: minmax(200px, 1fr) 120px 120px;
+    grid-template-columns: minmax(200px, 1fr) 110px 100px 120px;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
     cursor: pointer;
     user-select: none;
 }
@@ -169,6 +170,44 @@ h1 {
 .meta.rate {
     text-align: center;
     white-space: nowrap;
+}
+.expected-rate {
+    text-align: center;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--white);
+}
+.expected-rate.within-tolerance {
+    color: #22c55e;
+}
+.expected-rate.out-of-tolerance {
+    color: #ef4444;
+}
+.expected-rate-input {
+    width: 100%;
+    max-width: 120px;
+    padding: 4px 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    color: var(--white);
+    font-size: 12px;
+    text-align: center;
+    outline: none;
+    box-sizing: border-box;
+}
+.expected-rate-input:focus {
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.2);
+}
+/* Remove number input spinner buttons */
+.expected-rate-input::-webkit-outer-spin-button,
+.expected-rate-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.expected-rate-input[type=number] {
+    -moz-appearance: textfield;
 }
 .selected {
     outline: 2px solid rgba(6, 182, 212, 0.18);

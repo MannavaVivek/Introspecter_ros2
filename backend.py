@@ -6,7 +6,6 @@ import rclpy
 from rclpy.node import Node
 from pathlib import Path
 
-from rclpy.serialization import serialize_message
 import importlib
 import logging
 import threading
@@ -48,7 +47,7 @@ class RollingWindow:
 
 
 class TopicMonitor:
-    def __init__(self, topic_name):
+    def __init__(self, topic_name, expected_rate_hz=None):
         self.topic = topic_name
         self.node_window = RollingWindow()
         self.msg_window = RollingWindow()
@@ -56,6 +55,7 @@ class TopicMonitor:
         self.prev_msg_time_us = None
         self.last_update_ns = None
         self.sample_count = 0
+        self.expected_rate_hz = expected_rate_hz
 
     def update(self, msg_timestamp_ns):
         now_us = time.time() * 1e6
@@ -84,6 +84,7 @@ class TopicMonitor:
             "msg_rate_hz": self.msg_window.frame_rate_hz(),
             "last_update_ns": self.last_update_ns,
             "sample_count": self.sample_count,
+            "expected_rate_hz": self.expected_rate_hz,
         }
 
 
@@ -101,8 +102,8 @@ class TopicListNode(Node):
         Start monitoring a topic. If topic_type is None, try to discover it
         from get_topic_names_and_types().
         """
-        if topic_name in self.monitors:
-            # already monitoring
+        if topic_name in self._topic_subscriptions:
+            # already monitoring (subscription exists)
             return True
 
         # if type not provided, try to look it up
@@ -119,8 +120,9 @@ class TopicListNode(Node):
             )
             return False
 
-        # create the TopicMonitor and subscription
-        self.monitors[topic_name] = TopicMonitor(topic_name)
+        # create the TopicMonitor if it doesn't exist, or reuse existing one (might have expected_rate_hz)
+        if topic_name not in self.monitors:
+            self.monitors[topic_name] = TopicMonitor(topic_name)
 
         # resolve message class from the string type
         msg_type = None
@@ -192,6 +194,7 @@ class TopicListNode(Node):
                     "node_rate_hz": rate.get("node_rate_hz", 0),
                     "msg_rate_hz": rate.get("msg_rate_hz", 0),
                     "last_update_ns": rate.get("last_update_ns", None),
+                    "expected_rate_hz": rate.get("expected_rate_hz", None),
                 }
             )
         return result
@@ -295,6 +298,37 @@ def start_monitor(topic: str):
     except Exception as e:
         logging.getLogger('topic_list_node').exception(f"Failed to start monitor for {topic}")
         return JSONResponse({"error": f"Failed to start monitor for {topic}: {e}"}, status_code=500)
+
+
+@app.put("/api/expected_rate/{topic:path}")
+def set_expected_rate(topic: str, expected_rate_hz: float):
+    """Set the expected rate for a topic."""
+    global node
+    if node is None:
+        return JSONResponse({"error": "ROS2 node not initialized"}, status_code=500)
+    
+    # Check if topic is being monitored
+    if topic in node.monitors:
+        node.monitors[topic].expected_rate_hz = expected_rate_hz
+        return JSONResponse({"topic": topic, "expected_rate_hz": expected_rate_hz})
+    else:
+        # Create a monitor entry even if not subscribed yet, to preserve the expected rate
+        node.monitors[topic] = TopicMonitor(topic, expected_rate_hz)
+        return JSONResponse({"topic": topic, "expected_rate_hz": expected_rate_hz})
+
+
+@app.delete("/api/expected_rate/{topic:path}")
+def delete_expected_rate(topic: str):
+    """Remove the expected rate for a topic."""
+    global node
+    if node is None:
+        return JSONResponse({"error": "ROS2 node not initialized"}, status_code=500)
+    
+    if topic in node.monitors:
+        node.monitors[topic].expected_rate_hz = None
+        return JSONResponse({"topic": topic, "expected_rate_hz": None})
+    else:
+        return JSONResponse({"error": f"Topic {topic} not found in monitors"}, status_code=404)
 
 
 @app.delete("/api/monitor/{topic:path}")
