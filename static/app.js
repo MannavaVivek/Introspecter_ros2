@@ -25,6 +25,8 @@ const pollIntervalSelect = document.getElementById("pollInterval");
 const refreshBtn = document.getElementById("refreshBtn");
 const searchInput = document.getElementById("searchInput");
 const clearSearchBtn = document.getElementById("clearSearch");
+const searchToggleBtn = document.getElementById("searchToggle");
+let isSearchExpanded = false;
 
 // ======= Helpers =======
 function setStatus(s) {
@@ -507,6 +509,28 @@ function stopPolling() {
 }
 
 // ======= Search handling =======
+function expandSearch() {
+    isSearchExpanded = true;
+    searchInput.classList.remove('collapsed');
+    searchInput.classList.add('expanded');
+    searchToggleBtn.classList.add('hidden');
+    setTimeout(() => searchInput.focus(), 100);
+}
+
+function collapseSearch() {
+    isSearchExpanded = false;
+    searchInput.classList.remove('expanded');
+    searchInput.classList.add('collapsed');
+    searchToggleBtn.classList.remove('hidden');
+    searchInput.value = '';
+    searchQuery = '';
+    clearSearchBtn.style.display = 'none';
+    filterTopics();
+    selectedIndex = filteredTopics.length > 0 ? 0 : -1;
+    renderList();
+    listEl.focus();
+}
+
 function handleSearch() {
     searchQuery = searchInput.value;
     
@@ -538,6 +562,11 @@ listEl.addEventListener("keydown", onKeyDown);
 pollIntervalSelect.addEventListener("change", startPolling);
 refreshBtn.addEventListener("click", () => fetchTopicsOnce());
 
+// Search toggle button
+searchToggleBtn.addEventListener("click", () => {
+    expandSearch();
+});
+
 // Search input events
 searchInput.addEventListener("input", handleSearch);
 clearSearchBtn.addEventListener("click", clearSearch);
@@ -546,18 +575,34 @@ clearSearchBtn.addEventListener("click", clearSearch);
 searchInput.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
         e.preventDefault();
-        if (searchQuery) {
-            clearSearch();
-        }
+        collapseSearch();
     } else if (["ArrowUp", "ArrowDown", "Enter", " ", "PageUp", "PageDown", "Home", "End"].includes(e.key)) {
         e.preventDefault();
         onKeyDown(e);
     }
 });
 
-// focus the search input on page load
+// Global escape handler to collapse search when expanded
+document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && isSearchExpanded) {
+        e.preventDefault();
+        collapseSearch();
+    }
+});
+
+// Click outside to collapse search
+document.addEventListener("click", (e) => {
+    if (isSearchExpanded) {
+        const searchContainer = document.getElementById("searchContainer");
+        if (!searchContainer.contains(e.target)) {
+            collapseSearch();
+        }
+    }
+});
+
+// focus the list on page load (search is collapsed by default)
 window.addEventListener("load", () => {
-    searchInput.focus();
+    listEl.focus();
     startPolling();
 });
 
