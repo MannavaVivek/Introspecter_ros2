@@ -185,6 +185,12 @@ class TopicListNode(Node):
         # Return current rates and monitored state; do NOT auto-create monitors here
         result = []
         for name, types in topics:
+            # Check if topic has any active publishers
+            publishers_info = self.get_publishers_info_by_topic(name)
+            if not publishers_info:
+                # Skip topics with no active publishers
+                continue
+                
             rate = self.monitors[name].get_rate() if name in self.monitors else {}
             result.append(
                 {
