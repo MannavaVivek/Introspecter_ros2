@@ -9,11 +9,17 @@
     <body>
         <div class="app" role="application" aria-labelledby="title">
             <h1 id="title">ROS2 Topic Browser</h1>
-            <p class="subtitle">
-                Displays topics detected from your ROS2 system. Use
-                <strong>Up</strong> / <strong>Down</strong> to move the
-                highlighter.
-            </p>
+            
+            <div class="search-container">
+                <input 
+                    type="text" 
+                    id="searchInput" 
+                    class="search-input" 
+                    placeholder="Search topics..."
+                    autocomplete="off"
+                />
+                <button id="clearSearch" class="clear-button" style="display: none;" title="Clear search">✕</button>
+            </div>
 
             <div class="controls">
                 <label>
@@ -40,8 +46,7 @@
             </div>
 
             <div class="hint">
-                Click an item or use the arrow keys. Selected topic will be
-                shown in the console (for now).
+                Type to search • Use <strong>↑</strong>/<strong>↓</strong> to navigate • Press <strong>Enter</strong> to toggle monitoring
             </div>
         </div>
 

@@ -10,14 +10,18 @@ const API_URL = "/api/topics"; // change if your backend uses another path or ho
 
 // ======= State =======
 let topics = []; // array of strings
+let filteredTopics = []; // filtered based on search
 let selectedIndex = -1;
 let pollTimer = null;
+let searchQuery = "";
 
 const listEl = document.getElementById("list");
 const statusEl = document.getElementById("status");
 const emptyEl = document.getElementById("empty");
 const pollIntervalSelect = document.getElementById("pollInterval");
 const refreshBtn = document.getElementById("refreshBtn");
+const searchInput = document.getElementById("searchInput");
+const clearSearchBtn = document.getElementById("clearSearch");
 
 // ======= Helpers =======
 function setStatus(s) {
@@ -25,6 +29,21 @@ function setStatus(s) {
 }
 function clamp(i, min, max) {
     return Math.max(min, Math.min(max, i));
+}
+
+// Filter topics based on search query
+function filterTopics() {
+    if (!searchQuery) {
+        filteredTopics = topics;
+    } else {
+        filteredTopics = topics.filter(t => 
+            t.topic.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+    }
+    // Reset selection when filter changes
+    if (selectedIndex >= filteredTopics.length) {
+        selectedIndex = filteredTopics.length > 0 ? 0 : -1;
+    }
 }
 
 // Parse many possible shapes of the API response into an array of topic names
@@ -82,22 +101,18 @@ async function fetchTopicsOnce() {
         ).sort((a, b) => a.topic.localeCompare(b.topic));
 
         // update state
-    const prevTopics = topics.map(t => t.topic).join("|");
-    topics = normalized;
-
-        // keep selection anchored to the same topic name if possible
-        if (selectedIndex >= 0) {
-            const prevTopic = prevTopics.split("|")[selectedIndex] || null;
-            let newIndex = -1;
-            if (prevTopic) {
-                newIndex = topics.findIndex((o) => o.topic === prevTopic);
-            }
-            selectedIndex =
-                newIndex >= 0
-                    ? newIndex
-                    : topics.length
-                      ? clamp(selectedIndex, 0, topics.length - 1)
-                      : -1;
+        topics = normalized;
+        
+        // Apply search filter
+        filterTopics();
+        
+        // keep selection anchored if possible
+        if (selectedIndex >= 0 && filteredTopics.length > 0) {
+            selectedIndex = clamp(selectedIndex, 0, filteredTopics.length - 1);
+        } else if (filteredTopics.length > 0) {
+            selectedIndex = 0;
+        } else {
+            selectedIndex = -1;
         }
 
         renderList();
@@ -111,13 +126,23 @@ async function fetchTopicsOnce() {
 // ======= UI Rendering =======
 function renderList() {
     listEl.innerHTML = "";
-    if (!topics.length) {
-        emptyEl.textContent = "No topics found";
+    if (!filteredTopics.length) {
+        emptyEl.textContent = searchQuery ? `No topics matching "${searchQuery}"` : "No topics found";
         listEl.appendChild(emptyEl);
         return;
     }
 
-    topics.forEach((t, i) => {
+    // Add column headers
+    const header = document.createElement("div");
+    header.className = "topic-header";
+    header.innerHTML = `
+        <div class="header-cell">Topic Name</div>
+        <div class="header-cell">Status</div>
+        <div class="header-cell">Rate</div>
+    `;
+    listEl.appendChild(header);
+
+    filteredTopics.forEach((t, i) => {
         const item = document.createElement("div");
         item.className =
             "topic" + (i === selectedIndex ? " selected" : "") + (t.monitored ? " monitored" : "");
@@ -138,22 +163,9 @@ function renderList() {
         rate.className = "meta rate";
         rate.textContent = t.monitored ? `${Number(t.msg_rate_hz).toFixed(1)} Hz` : "";
 
-        const last = document.createElement("div");
-        last.className = "meta last";
-        if (t.last_update_ns) {
-            const d = new Date(Number(t.last_update_ns) / 1e6);
-            last.textContent = d.toLocaleTimeString();
-        } else {
-            last.textContent = "";
-        }
-        const meta = document.createElement("div");
-        meta.className = "meta index";
-        meta.textContent = `#${i + 1}`;
         item.appendChild(name);
         item.appendChild(badge);
         item.appendChild(rate);
-        item.appendChild(last);
-        item.appendChild(meta);
 
         // click -> select and log
         item.addEventListener("click", () => {
@@ -176,16 +188,16 @@ function ensureSelectedInView() {
 }
 
 function setSelectedIndex(i, opts = {}) {
-    if (!topics.length) return;
-    selectedIndex = clamp(i, 0, topics.length - 1);
+    if (!filteredTopics.length) return;
+    selectedIndex = clamp(i, 0, filteredTopics.length - 1);
     renderList();
     ensureSelectedInView();
-    const topic = topics[selectedIndex];
+    const topic = filteredTopics[selectedIndex];
     // for now: log; you can replace with pushing selection to backend or opening detail pane
     console.log("Selected topic:", topic);
     if (opts.userAction) {
         // small feedback
-        setStatus(`selected ${topic}`);
+        setStatus(`selected ${topic.topic}`);
     }
 }
 
@@ -204,12 +216,12 @@ function onKeyDown(e) {
     )
         return;
     e.preventDefault();
-    if (!topics.length) return;
+    if (!filteredTopics.length) return;
     // print the key pressed to console
     console.log(`Key pressed: ${e.key}`);
     if (e.key === 'Enter') {
         e.preventDefault();
-        const t = topics[selectedIndex];
+        const t = filteredTopics[selectedIndex];
         if (!t) return;
         const topicEnc = encodeURIComponent(t.topic);
         // optimistic UI update
@@ -241,8 +253,8 @@ function onKeyDown(e) {
         );
     } else if (e.key === "ArrowDown") {
         setSelectedIndex(
-            selectedIndex >= topics.length - 1
-                ? topics.length - 1
+            selectedIndex >= filteredTopics.length - 1
+                ? filteredTopics.length - 1
                 : selectedIndex + 1,
             { userAction: true },
         );
@@ -265,7 +277,7 @@ function onKeyDown(e) {
     } else if (e.key === "Home") {
         setSelectedIndex(0, { userAction: true });
     } else if (e.key === "End") {
-        setSelectedIndex(topics.length - 1, { userAction: true });
+        setSelectedIndex(filteredTopics.length - 1, { userAction: true });
     }
 }
 
@@ -285,13 +297,58 @@ function stopPolling() {
     }
 }
 
+// ======= Search handling =======
+function handleSearch() {
+    searchQuery = searchInput.value;
+    
+    // Show/hide clear button
+    if (searchQuery) {
+        clearSearchBtn.style.display = 'flex';
+    } else {
+        clearSearchBtn.style.display = 'none';
+    }
+    
+    // Filter and re-render
+    filterTopics();
+    selectedIndex = filteredTopics.length > 0 ? 0 : -1;
+    renderList();
+}
+
+function clearSearch() {
+    searchInput.value = '';
+    searchQuery = '';
+    clearSearchBtn.style.display = 'none';
+    filterTopics();
+    selectedIndex = filteredTopics.length > 0 ? 0 : -1;
+    renderList();
+    searchInput.focus();
+}
+
 // ======= Wire up events =======
 listEl.addEventListener("keydown", onKeyDown);
 pollIntervalSelect.addEventListener("change", startPolling);
 refreshBtn.addEventListener("click", () => fetchTopicsOnce());
-// focus the list on page load so arrow keys work immediately
+
+// Search input events
+searchInput.addEventListener("input", handleSearch);
+clearSearchBtn.addEventListener("click", clearSearch);
+
+// Allow arrow keys in search input to control list navigation
+searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+        e.preventDefault();
+        if (searchQuery) {
+            clearSearch();
+        }
+    } else if (["ArrowUp", "ArrowDown", "Enter", "PageUp", "PageDown", "Home", "End"].includes(e.key)) {
+        e.preventDefault();
+        onKeyDown(e);
+    }
+});
+
+// focus the search input on page load
 window.addEventListener("load", () => {
-    listEl.focus();
+    searchInput.focus();
     startPolling();
 });
 
