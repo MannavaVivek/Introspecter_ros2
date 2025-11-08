@@ -17,6 +17,7 @@ let searchQuery = "";
 let expectedRates = {}; // store expected rates per topic: { "topic_name": expectedHz }
 let editingRateIndex = -1; // index of topic currently being edited
 let isInputRendered = false; // track if input is currently rendered
+let showMonitoredOnly = false; // filter to show only monitored topics
 
 const listEl = document.getElementById("list");
 const statusEl = document.getElementById("status");
@@ -26,6 +27,7 @@ const refreshBtn = document.getElementById("refreshBtn");
 const searchInput = document.getElementById("searchInput");
 const clearSearchBtn = document.getElementById("clearSearch");
 const searchToggleBtn = document.getElementById("searchToggle");
+const monitoredToggleBtn = document.getElementById("monitoredToggle");
 let isSearchExpanded = false;
 
 // ======= Helpers =======
@@ -92,15 +94,23 @@ function updateRatesOnly() {
     });
 }
 
-// Filter topics based on search query
+// Filter topics based on search query and monitored status
 function filterTopics() {
-    if (!searchQuery) {
-        filteredTopics = topics;
-    } else {
-        filteredTopics = topics.filter(t => 
+    let result = topics;
+    
+    // Apply search filter if search is active
+    if (searchQuery) {
+        result = result.filter(t => 
             t.topic.toLowerCase().includes(searchQuery.toLowerCase())
         );
     }
+    // Apply monitored filter if toggle is on and search is NOT active
+    else if (showMonitoredOnly) {
+        result = result.filter(t => t.monitored);
+    }
+    
+    filteredTopics = result;
+    
     // Reset selection when filter changes
     if (selectedIndex >= filteredTopics.length) {
         selectedIndex = filteredTopics.length > 0 ? 0 : -1;
@@ -561,6 +571,19 @@ function clearSearch() {
 listEl.addEventListener("keydown", onKeyDown);
 pollIntervalSelect.addEventListener("change", startPolling);
 refreshBtn.addEventListener("click", () => fetchTopicsOnce());
+
+// Monitored toggle button
+monitoredToggleBtn.addEventListener("click", () => {
+    showMonitoredOnly = !showMonitoredOnly;
+    if (showMonitoredOnly) {
+        monitoredToggleBtn.classList.add('active');
+    } else {
+        monitoredToggleBtn.classList.remove('active');
+    }
+    filterTopics();
+    selectedIndex = filteredTopics.length > 0 ? 0 : -1;
+    renderList();
+});
 
 // Search toggle button
 searchToggleBtn.addEventListener("click", () => {
