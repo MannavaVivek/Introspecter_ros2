@@ -47,7 +47,7 @@ class RollingWindow:
 
 
 class TopicMonitor:
-    def __init__(self, topic_name, expected_rate_hz=None):
+    def __init__(self, topic_name, expected_rate_hz=None, stale_timeout_sec=2.0):
         self.topic = topic_name
         self.node_window = RollingWindow()
         self.msg_window = RollingWindow()
@@ -56,6 +56,7 @@ class TopicMonitor:
         self.last_update_ns = None
         self.sample_count = 0
         self.expected_rate_hz = expected_rate_hz
+        self.stale_timeout_sec = stale_timeout_sec
 
     def update(self, msg_timestamp_ns):
         now_us = time.time() * 1e6
@@ -78,7 +79,25 @@ class TopicMonitor:
             self.last_update_ns = time.time_ns()
         self.sample_count += 1
 
+    def is_stale(self):
+        """Check if the topic data is stale (no recent updates)."""
+        if self.last_update_ns is None:
+            return True
+        now_ns = time.time_ns()
+        elapsed_sec = (now_ns - self.last_update_ns) / 1e9
+        return elapsed_sec > self.stale_timeout_sec
+
     def get_rate(self):
+        # If data is stale, return 0 Hz
+        if self.is_stale():
+            return {
+                "node_rate_hz": 0.0,
+                "msg_rate_hz": 0.0,
+                "last_update_ns": self.last_update_ns,
+                "sample_count": self.sample_count,
+                "expected_rate_hz": self.expected_rate_hz,
+            }
+        
         return {
             "node_rate_hz": self.node_window.frame_rate_hz(),
             "msg_rate_hz": self.msg_window.frame_rate_hz(),
