@@ -144,9 +144,9 @@ async function fetchTopicsOnce() {
             newTopics = [];
         }
 
-        // normalize into objects: { topic, type?, monitored?, node_rate_hz?, msg_rate_hz? }
+        // normalize into objects: { topic, type?, monitored?, node_rate_hz?, msg_rate_hz?, expected_rate_hz? }
         const toObj = (t) => {
-            if (typeof t === 'string') return { topic: String(t), type: '', monitored: false, node_rate_hz: 0, msg_rate_hz: 0, last_update_ns: null };
+            if (typeof t === 'string') return { topic: String(t), type: '', monitored: false, node_rate_hz: 0, msg_rate_hz: 0, last_update_ns: null, expected_rate_hz: null };
             if (t && typeof t === 'object') return {
                 topic: String(t.topic || t.name || ''),
                 type: t.type || '',
@@ -154,8 +154,9 @@ async function fetchTopicsOnce() {
                 node_rate_hz: Number(t.node_rate_hz || 0),
                 msg_rate_hz: Number(t.msg_rate_hz || 0),
                 last_update_ns: t.last_update_ns || null,
+                expected_rate_hz: t.expected_rate_hz !== null && t.expected_rate_hz !== undefined ? Number(t.expected_rate_hz) : null,
             };
-            return { topic: String(t), type: '', monitored: false, node_rate_hz: 0, msg_rate_hz: 0, last_update_ns: null };
+            return { topic: String(t), type: '', monitored: false, node_rate_hz: 0, msg_rate_hz: 0, last_update_ns: null, expected_rate_hz: null };
         };
 
         let normalized = Array.from(new Set(newTopics.map(String))).map((s) => ({ topic: s }));
@@ -174,7 +175,8 @@ async function fetchTopicsOnce() {
         // update state
         topics = normalized;
         
-        // Load expected rates from backend data
+        // Clear and reload expected rates from backend data to ensure sync
+        expectedRates = {};
         topics.forEach(t => {
             if (t.expected_rate_hz !== null && t.expected_rate_hz !== undefined) {
                 expectedRates[t.topic] = t.expected_rate_hz;
