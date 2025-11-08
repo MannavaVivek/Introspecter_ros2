@@ -49,39 +49,117 @@ h1 {
     align-items: center;
     gap: 8px;
 }
-.monitored-toggle-button {
-    background: var(--card);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    color: var(--white);
+/* Toggle Label */
+.toggle-label {
+    color: var(--muted);
+    font-size: 13px;
+    white-space: nowrap;
+    margin-left: 16px;
+    flex-shrink: 0;
+}
+/* Toggle Switch - Material Design Style */
+.cl-toggle-switch {
+    position: relative;
+    margin-left: 8px;
+    flex-shrink: 0;
+}
+.cl-switch {
+    position: relative;
+    display: inline-block;
+}
+/* Input */
+.cl-switch > input {
+    appearance: none;
+    -moz-appearance: none;
+    -webkit-appearance: none;
+    z-index: -1;
+    position: absolute;
+    right: 6px;
+    top: -8px;
+    display: block;
+    margin: 0;
+    border-radius: 50%;
     width: 40px;
     height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    flex-shrink: 0;
-    padding: 0;
+    background-color: rgba(6, 182, 212, 0.38);
+    outline: none;
+    opacity: 0;
+    transform: scale(1);
+    pointer-events: none;
+    transition: opacity 0.3s 0.1s, transform 0.2s 0.1s;
 }
-.monitored-toggle-button svg {
-    opacity: 0.7;
-    transition: all 0.2s ease;
+/* Track */
+.cl-switch > span::before {
+    content: "";
+    float: right;
+    display: inline-block;
+    margin: 5px 0 5px 10px;
+    border-radius: 7px;
+    width: 36px;
+    height: 14px;
+    background-color: rgba(255, 255, 255, 0.3);
+    vertical-align: top;
+    transition: background-color 0.2s, opacity 0.2s;
 }
-.monitored-toggle-button:hover {
-    border-color: var(--accent);
-    background: rgba(6, 182, 212, 0.1);
+/* Thumb */
+.cl-switch > span::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    right: 16px;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    background-color: #fff;
+    box-shadow: 0 3px 1px -2px rgba(0, 0, 0, 0.2), 0 2px 2px 0 rgba(0, 0, 0, 0.14), 0 1px 5px 0 rgba(0, 0, 0, 0.12);
+    transition: background-color 0.2s, transform 0.2s;
 }
-.monitored-toggle-button:hover svg {
+/* Checked */
+.cl-switch > input:checked {
+    right: -10px;
+    background-color: var(--accent);
+}
+.cl-switch > input:checked + span::before {
+    background-color: rgba(6, 182, 212, 0.5);
+}
+.cl-switch > input:checked + span::after {
+    background-color: var(--accent);
+    transform: translateX(16px);
+}
+/* Hover, Focus */
+.cl-switch:hover > input {
+    opacity: 0.04;
+}
+.cl-switch > input:focus {
+    opacity: 0.12;
+}
+.cl-switch:hover > input:focus {
+    opacity: 0.16;
+}
+/* Active */
+.cl-switch > input:active {
     opacity: 1;
+    transform: scale(0);
+    transition: transform 0s, opacity 0s;
 }
-.monitored-toggle-button.active {
-    background: rgba(6, 182, 212, 0.2);
-    border-color: var(--accent);
+.cl-switch > input:active + span::before {
+    background-color: rgba(255, 255, 255, 0.4);
 }
-.monitored-toggle-button.active svg {
-    opacity: 1;
-    fill: var(--accent);
+.cl-switch > input:checked:active + span::before {
+    background-color: rgba(6, 182, 212, 0.5);
+}
+/* Disabled */
+.cl-switch > input:disabled {
+    opacity: 0;
+}
+.cl-switch > input:disabled + span::before {
+    background-color: #ddd;
+}
+.cl-switch > input:checked:disabled + span::before {
+    background-color: rgba(6, 182, 212, 0.3);
+}
+.cl-switch > input:checked:disabled + span::after {
+    background-color: var(--accent);
 }
 .search-toggle-button {
     background: var(--card);

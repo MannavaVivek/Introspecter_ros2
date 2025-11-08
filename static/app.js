@@ -572,14 +572,9 @@ listEl.addEventListener("keydown", onKeyDown);
 pollIntervalSelect.addEventListener("change", startPolling);
 refreshBtn.addEventListener("click", () => fetchTopicsOnce());
 
-// Monitored toggle button
-monitoredToggleBtn.addEventListener("click", () => {
-    showMonitoredOnly = !showMonitoredOnly;
-    if (showMonitoredOnly) {
-        monitoredToggleBtn.classList.add('active');
-    } else {
-        monitoredToggleBtn.classList.remove('active');
-    }
+// Monitored toggle button (checkbox)
+monitoredToggleBtn.addEventListener("change", () => {
+    showMonitoredOnly = monitoredToggleBtn.checked;
     filterTopics();
     selectedIndex = filteredTopics.length > 0 ? 0 : -1;
     renderList();
