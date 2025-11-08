@@ -215,7 +215,7 @@ function renderList() {
     
     listEl.innerHTML = "";
     if (!filteredTopics.length) {
-        emptyEl.textContent = searchQuery ? `No topics matching "${searchQuery}"` : "No topics found";
+        emptyEl.textContent = searchQuery ? `No topics matching "${searchQuery}"` : "No topics being monitored";
         listEl.appendChild(emptyEl);
         return;
     }
