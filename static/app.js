@@ -883,12 +883,7 @@ function collapseSearch() {
     searchInput.classList.remove('expanded');
     searchInput.classList.add('collapsed');
     searchToggleBtn.classList.remove('hidden');
-    searchInput.value = '';
-    searchQuery = '';
-    clearSearchBtn.style.display = 'none';
-    filterTopics();
-    selectedIndex = filteredTopics.length > 0 ? 0 : -1;
-    renderList();
+    // Don't clear the search query - keep the filter active
     listEl.focus();
 }
 
@@ -941,11 +936,21 @@ function switchTab(tabName) {
     
     if (tabName === 'topics') {
         document.getElementById('topicsTab').classList.add('active');
+        // Clear node search when switching to topics
+        if (nodeSearchQuery) {
+            clearNodeSearch();
+            collapseNodeSearch();
+        }
         stopNodesPolling();
         startPolling();
         listEl.focus();
     } else if (tabName === 'nodes') {
         document.getElementById('nodesTab').classList.add('active');
+        // Clear topic search when switching to nodes
+        if (searchQuery) {
+            clearSearch();
+            collapseSearch();
+        }
         stopPolling();
         startNodesPolling();
         nodeListEl.focus();
@@ -1455,12 +1460,7 @@ function collapseNodeSearch() {
     nodeSearchInput.classList.remove('expanded');
     nodeSearchInput.classList.add('collapsed');
     nodeSearchToggleBtn.classList.remove('hidden');
-    nodeSearchInput.value = '';
-    nodeSearchQuery = '';
-    nodeClearSearchBtn.style.display = 'none';
-    filterNodes();
-    selectedNodeIndex = filteredNodes.length > 0 ? 0 : -1;
-    renderNodeList();
+    // Don't clear the search query - keep the filter active
     nodeListEl.focus();
 }
 
@@ -1526,6 +1526,8 @@ clearSearchBtn.addEventListener("click", clearSearch);
 searchInput.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
         e.preventDefault();
+        // Escape clears the search entirely
+        clearSearch();
         collapseSearch();
     } else if (["ArrowUp", "ArrowDown", "Enter", " ", "PageUp", "PageDown", "Home", "End"].includes(e.key)) {
         e.preventDefault();
@@ -1537,16 +1539,21 @@ searchInput.addEventListener("keydown", (e) => {
 document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && isSearchExpanded) {
         e.preventDefault();
+        // Escape clears the search entirely
+        clearSearch();
         collapseSearch();
     }
 });
 
-// Click outside to collapse search
+// Click outside to collapse search (only if search is empty)
 document.addEventListener("click", (e) => {
     if (isSearchExpanded) {
         const searchContainer = document.getElementById("searchContainer");
         if (!searchContainer.contains(e.target)) {
-            collapseSearch();
+            // Only collapse if there's no active search query
+            if (!searchQuery) {
+                collapseSearch();
+            }
         }
     }
 });
@@ -1603,6 +1610,8 @@ nodeClearSearchBtn.addEventListener("click", clearNodeSearch);
 nodeSearchInput.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
         e.preventDefault();
+        // Escape clears the search entirely
+        clearNodeSearch();
         collapseNodeSearch();
     } else if (["ArrowUp", "ArrowDown", " ", "PageUp", "PageDown", "Home", "End"].includes(e.key)) {
         e.preventDefault();
@@ -1626,16 +1635,21 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && isNodeSearchExpanded) {
         e.preventDefault();
+        // Escape clears the search entirely
+        clearNodeSearch();
         collapseNodeSearch();
     }
 });
 
-// Click outside to collapse node search
+// Click outside to collapse node search (only if search is empty)
 document.addEventListener("click", (e) => {
     if (isNodeSearchExpanded) {
         const nodeSearchContainer = document.getElementById("nodeSearchContainer");
         if (!nodeSearchContainer.contains(e.target)) {
-            collapseNodeSearch();
+            // Only collapse if there's no active search query
+            if (!nodeSearchQuery) {
+                collapseNodeSearch();
+            }
         }
     }
 });
