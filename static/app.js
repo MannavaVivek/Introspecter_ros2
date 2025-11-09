@@ -20,7 +20,7 @@ let expectedRates = {}; // store expected rates per topic: { "topic_name": expec
 let editingRateIndex = -1; // index of topic currently being edited
 let isInputRendered = false; // track if input is currently rendered
 let showMonitoredOnly = false; // filter to show only monitored topics
-let expandedTopicIndex = -1; // index of expanded topic (-1 means none)
+let expandedTopicIndex = -1; // currently expanded topic index (-1 means none)
 let topicDetailsCache = {}; // cache for topic details
 
 // Node browser state
@@ -137,18 +137,53 @@ async function fetchTopicDetails(topicName, forceRefresh = false) {
 
 // Update the expanded topic details without full re-render
 function updateExpandedTopicDetails() {
-    if (expandedTopicIndex < 0 || expandedTopicIndex >= filteredTopics.length) return;
+    // With multiple expansions, just update rates which is faster
+    updateRatesOnly();
+}
+
+// Collapse the currently expanded topic incrementally
+function collapseExpandedTopic() {
+    if (expandedTopicIndex >= 0) {
+        const items = listEl.querySelectorAll('.topic');
+        const expandedItem = items[expandedTopicIndex];
+        if (expandedItem) {
+            const nextSibling = expandedItem.nextElementSibling;
+            if (nextSibling && nextSibling.classList.contains('topic-details')) {
+                nextSibling.remove();
+            }
+        }
+        expandedTopicIndex = -1;
+    }
+}
+
+// Update selection without re-rendering entire list
+function updateTopicSelection(newIndex) {
+    const oldIndex = selectedIndex;
+    selectedIndex = newIndex;
     
-    const t = filteredTopics[expandedTopicIndex];
-    const details = topicDetailsCache[t.topic];
-    if (!details) return;
+    // Update classes on affected items
+    const items = listEl.querySelectorAll('.topic');
+    if (items[oldIndex]) {
+        items[oldIndex].classList.remove('selected');
+    }
+    if (items[newIndex]) {
+        items[newIndex].classList.add('selected');
+        items[newIndex].scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
     
-    // Find the details element in the DOM
-    const detailsEl = listEl.querySelector('.topic-details');
-    if (!detailsEl) return;
+    const t = filteredTopics[newIndex];
+    if (t) {
+        setStatus(`selected ${t.topic}`);
+    }
+}
+
+// Build topic details HTML
+function buildTopicDetailsHTML(details) {
+    if (!details) {
+        return `<div class="details-section"><div class="details-loading">Loading details...</div></div>`;
+    }
     
-    // Update the details content
-    detailsEl.innerHTML = `
+    return `
         <div class="details-section">
             <div class="details-header">Topic Information</div>
             <div class="details-grid">
@@ -164,12 +199,6 @@ function updateExpandedTopicDetails() {
                     <span class="detail-label">Subscribers:</span>
                     <span class="detail-value">${details.subscribers_count || 0}</span>
                 </div>
-                ${details.monitored ? `
-                    <div class="detail-item">
-                        <span class="detail-label">Sample Count:</span>
-                        <span class="detail-value">${details.sample_count || 0}</span>
-                    </div>
-                ` : ''}
             </div>
             ${details.publishers && details.publishers.length > 0 ? `
                 <div class="details-subheader">Publishing Nodes</div>
@@ -191,14 +220,6 @@ function updateExpandedTopicDetails() {
             ` : ''}
         </div>
     `;
-}
-
-// Collapse expanded topic
-function collapseTopicDetails() {
-    if (expandedTopicIndex >= 0) {
-        expandedTopicIndex = -1;
-        renderList();
-    }
 }
 
 // Filter topics based on search query and monitored status
@@ -305,13 +326,12 @@ async function fetchTopicsOnce() {
         // If details are expanded, only update rates to avoid flashing
         if (expandedTopicIndex >= 0) {
             updateRatesOnly();
-            // Also refresh the expanded topic details
+            // Also refresh the expanded topic
             const expandedTopic = filteredTopics[expandedTopicIndex];
             if (expandedTopic) {
                 await fetchTopicDetails(expandedTopic.topic, true); // Force refresh
-                // Re-render just the details section
-                updateExpandedTopicDetails();
             }
+            updateExpandedTopicDetails();
         } else {
             renderList();
         }
@@ -500,38 +520,55 @@ function renderList() {
         item.addEventListener("click", (e) => {
             // Don't trigger if clicking on input field
             if (e.target.classList.contains('expected-rate-input')) return;
-            setSelectedIndex(i, { userAction: true });
-            // Always collapse details on single click
-            if (expandedTopicIndex >= 0) {
-                collapseTopicDetails();
+            
+            // If clicking on already expanded topic, collapse it
+            if (expandedTopicIndex === i) {
+                collapseExpandedTopic();
+            } else {
+                // Just update selection without re-rendering
+                updateTopicSelection(i);
             }
         });
 
         // double-click -> expand details
         item.addEventListener("dblclick", async (e) => {
             e.preventDefault();
+            
+            // If this is already the expanded topic, just keep it expanded
             if (expandedTopicIndex === i) {
-                // Already expanded, collapse it
-                collapseTopicDetails();
-            } else {
-                // Expand this item
-                expandedTopicIndex = i;
-                setSelectedIndex(i, { userAction: false });
-                renderList(); // Re-render to show loading
+                return;
+            }
+            
+            // Collapse any currently expanded topic first
+            collapseExpandedTopic();
+            
+            // Now expand this item
+            expandedTopicIndex = i;
+            updateTopicSelection(i);
+            
+            // Add loading details element immediately
+            const detailsRow = document.createElement("div");
+            detailsRow.className = "topic-details";
+            detailsRow.innerHTML = '<div class="details-section">Loading...</div>';
+            item.insertAdjacentElement('afterend', detailsRow);
+            
+            // Fetch details
+            const details = await fetchTopicDetails(t.topic);
+            if (details && expandedTopicIndex === i) {
+                // Update the details content
+                detailsRow.innerHTML = buildTopicDetailsHTML(details);
                 
-                // Fetch details
-                const details = await fetchTopicDetails(t.topic);
-                if (details && expandedTopicIndex === i) {
-                    // Still expanded, render with details
-                    renderList();
-                }
+                // Prevent clicks inside details from bubbling up
+                detailsRow.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                });
             }
         });
 
         listEl.appendChild(item);
         
         // Add expanded details section if this is the expanded item
-        if (i === expandedTopicIndex) {
+        if (expandedTopicIndex === i) {
             const detailsRow = document.createElement("div");
             detailsRow.className = "topic-details";
             
@@ -541,57 +578,7 @@ function renderList() {
             });
             
             const details = topicDetailsCache[t.topic];
-            if (details) {
-                detailsRow.innerHTML = `
-                    <div class="details-section">
-                        <div class="details-header">Topic Information</div>
-                        <div class="details-grid">
-                            <div class="detail-item">
-                                <span class="detail-label">Type:</span>
-                                <span class="detail-value monospace">${details.type || 'N/A'}</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">Publishers:</span>
-                                <span class="detail-value">${details.publishers_count || 0}</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">Subscribers:</span>
-                                <span class="detail-value">${details.subscribers_count || 0}</span>
-                            </div>
-                            ${details.monitored ? `
-                                <div class="detail-item">
-                                    <span class="detail-label">Sample Count:</span>
-                                    <span class="detail-value">${details.sample_count || 0}</span>
-                                </div>
-                            ` : ''}
-                        </div>
-                        ${details.publishers && details.publishers.length > 0 ? `
-                            <div class="details-subheader">Publishing Nodes</div>
-                            <div class="details-list">
-                                ${details.publishers.map(p => {
-                                    const ns = p.node_namespace && p.node_namespace !== '/' ? p.node_namespace : '';
-                                    return `<div class="list-item monospace">${ns}/${p.node_name}</div>`.replace('//', '/');
-                                }).join('')}
-                            </div>
-                        ` : ''}
-                        ${details.subscribers && details.subscribers.length > 0 ? `
-                            <div class="details-subheader">Subscribing Nodes</div>
-                            <div class="details-list">
-                                ${details.subscribers.map(s => {
-                                    const ns = s.node_namespace && s.node_namespace !== '/' ? s.node_namespace : '';
-                                    return `<div class="list-item monospace">${ns}/${s.node_name}</div>`.replace('//', '/');
-                                }).join('')}
-                            </div>
-                        ` : ''}
-                    </div>
-                `;
-            } else {
-                detailsRow.innerHTML = `
-                    <div class="details-section">
-                        <div class="details-loading">Loading details...</div>
-                    </div>
-                `;
-            }
+            detailsRow.innerHTML = buildTopicDetailsHTML(details);
             
             listEl.appendChild(detailsRow);
         }
@@ -621,6 +608,147 @@ function setSelectedIndex(i, opts = {}) {
 }
 
 // ======= Keyboard handling =======
+
+// Helper function to create expected rate input field incrementally
+function startEditingRateIncrementally(index) {
+    const t = filteredTopics[index];
+    if (!t) return;
+    
+    editingRateIndex = index;
+    isInputRendered = true;
+    
+    // Find the topic item in the DOM
+    const items = listEl.querySelectorAll('.topic');
+    const topicItem = items[index];
+    if (!topicItem) return;
+    
+    // Find the expected rate cell
+    const expectedRateCell = topicItem.querySelector('.expected-rate');
+    if (!expectedRateCell) return;
+    
+    // Store the previous value for cancel
+    const previousValue = expectedRates[t.topic];
+    
+    // Create the input field
+    const input = document.createElement("input");
+    input.type = "number";
+    input.className = "expected-rate-input";
+    input.placeholder = "Enter Hz";
+    input.value = expectedRates[t.topic] || "";
+    input.step = "0.1";
+    input.min = "0";
+    
+    // Handle input submission
+    const handleSubmit = () => {
+        const val = parseFloat(input.value);
+        const topicEnc = encodeURIComponent(t.topic);
+        
+        if (!isNaN(val) && val > 0) {
+            expectedRates[t.topic] = val;
+            // Save to backend
+            fetch(`/api/expected_rate/${topicEnc}?expected_rate_hz=${val}`, { method: 'PUT' })
+                .catch((err) => console.error('Failed to save expected rate', err));
+        } else if (input.value === "") {
+            delete expectedRates[t.topic];
+            // Delete from backend
+            fetch(`/api/expected_rate/${topicEnc}`, { method: 'DELETE' })
+                .catch((err) => console.error('Failed to delete expected rate', err));
+        }
+        
+        editingRateIndex = -1;
+        isInputRendered = false;
+        renderList();
+        // Return focus to list for keyboard navigation
+        setTimeout(() => listEl.focus(), 0);
+    };
+    
+    // Handle cancel (restore previous value)
+    const handleCancel = () => {
+        // Restore previous value
+        if (previousValue !== undefined) {
+            expectedRates[t.topic] = previousValue;
+        } else {
+            delete expectedRates[t.topic];
+        }
+        
+        editingRateIndex = -1;
+        isInputRendered = false;
+        
+        // Update just this cell incrementally
+        updateExpectedRateCell(expectedRateCell, t);
+        
+        // Return focus to list for keyboard navigation
+        setTimeout(() => listEl.focus(), 0);
+    };
+    
+    input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            e.stopPropagation();
+            handleSubmit();
+        } else if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            handleCancel();
+        } else {
+            // Stop other key events from propagating
+            e.stopPropagation();
+        }
+    });
+    
+    // Handle blur to close input
+    input.addEventListener("blur", () => {
+        // Small delay to allow clicking on other UI elements
+        setTimeout(() => {
+            if (editingRateIndex === index) {
+                handleCancel();
+            }
+        }, 100);
+    });
+    
+    // Prevent click from propagating
+    input.addEventListener("click", (e) => {
+        e.stopPropagation();
+    });
+    
+    // Replace the cell content with the input
+    expectedRateCell.innerHTML = '';
+    expectedRateCell.appendChild(input);
+    
+    // Auto-focus the input
+    setTimeout(() => {
+        input.focus();
+        input.select();
+    }, 50);
+}
+
+// Helper function to update expected rate cell display
+function updateExpectedRateCell(cell, topic) {
+    cell.innerHTML = '';
+    
+    if (expectedRates[topic.topic] !== undefined) {
+        const expectedHz = expectedRates[topic.topic];
+        const actualHz = topic.msg_rate_hz || 0;
+        
+        // Check if within 10% tolerance (only if monitored and has actual rate)
+        let colorClass = "";
+        if (topic.monitored && actualHz > 0) {
+            const tolerance = expectedHz * 0.1;
+            if (Math.abs(actualHz - expectedHz) <= tolerance) {
+                colorClass = "within-tolerance";
+            } else {
+                colorClass = "out-of-tolerance";
+            }
+        }
+        
+        cell.className = `expected-rate ${colorClass}`;
+        cell.textContent = `${expectedHz.toFixed(1)} Hz`;
+    } else {
+        cell.className = 'expected-rate';
+        cell.textContent = "";
+    }
+}
+
 function onKeyDown(e) {
     if (
         ![
@@ -644,23 +772,50 @@ function onKeyDown(e) {
         const t = filteredTopics[selectedIndex];
         if (!t) return;
         const topicEnc = encodeURIComponent(t.topic);
-        // optimistic UI update
+        
+        // Optimistic UI update - toggle monitored state
+        const wasMonitored = t.monitored;
         t.monitored = !t.monitored;
-        renderList();
-        // toggle monitored
+        
+        // Find the topic item in the DOM and update it incrementally
+        const items = listEl.querySelectorAll('.topic');
+        const currentItem = items[selectedIndex];
+        if (currentItem) {
+            // Update monitored class
+            if (t.monitored) {
+                currentItem.classList.add('monitored');
+            } else {
+                currentItem.classList.remove('monitored');
+            }
+            
+            // Update badge
+            const badgeEl = currentItem.querySelector('.badge');
+            if (badgeEl) {
+                badgeEl.textContent = t.monitored ? "monitored" : "";
+            }
+            
+            // Update rate display if needed
+            const rateEl = currentItem.querySelector('.meta.rate');
+            if (rateEl) {
+                rateEl.textContent = t.monitored ? `${Number(t.msg_rate_hz).toFixed(1)} Hz` : "";
+            }
+        }
+        
+        // Toggle monitored on backend
         if (!t.monitored) {
-            // after optimistic toggle we set to unmonitored, so we must DELETE
             fetch(`/api/monitor/${topicEnc}`, { method: 'DELETE' })
-                .then(() => fetchTopicsOnce())
                 .catch((err) => {
                     console.error('Failed to stop monitor', err);
+                    // Revert optimistic update on error
+                    t.monitored = wasMonitored;
                     fetchTopicsOnce();
                 });
         } else {
             fetch(`/api/monitor/${topicEnc}`, { method: 'POST' })
-                .then(() => fetchTopicsOnce())
                 .catch((err) => {
                     console.error('Failed to start monitor', err);
+                    // Revert optimistic update on error
+                    t.monitored = wasMonitored;
                     fetchTopicsOnce();
                 });
         }
@@ -672,48 +827,29 @@ function onKeyDown(e) {
         e.preventDefault();
         const t = filteredTopics[selectedIndex];
         if (!t) return;
-        editingRateIndex = selectedIndex;
-        renderList();
+        startEditingRateIncrementally(selectedIndex);
         return;
     }
     if (e.key === "ArrowUp") {
-        collapseTopicDetails();
-        setSelectedIndex(
-            selectedIndex <= 0 ? 0 : selectedIndex - 1,
-            { userAction: true },
-        );
+        const newIndex = selectedIndex <= 0 ? 0 : selectedIndex - 1;
+        updateTopicSelection(newIndex);
     } else if (e.key === "ArrowDown") {
-        collapseTopicDetails();
-        setSelectedIndex(
-            selectedIndex >= filteredTopics.length - 1
-                ? filteredTopics.length - 1
-                : selectedIndex + 1,
-            { userAction: true },
-        );
+        const newIndex = selectedIndex >= filteredTopics.length - 1
+            ? filteredTopics.length - 1
+            : selectedIndex + 1;
+        updateTopicSelection(newIndex);
     } else if (e.key === "PageUp") {
-        collapseTopicDetails();
-        const visible = Math.max(
-            1,
-            Math.floor(listEl.clientHeight / 48),
-        );
-        setSelectedIndex(selectedIndex - visible, {
-            userAction: true,
-        });
+        const visible = Math.max(1, Math.floor(listEl.clientHeight / 48));
+        const newIndex = Math.max(0, selectedIndex - visible);
+        updateTopicSelection(newIndex);
     } else if (e.key === "PageDown") {
-        collapseTopicDetails();
-        const visible = Math.max(
-            1,
-            Math.floor(listEl.clientHeight / 48),
-        );
-        setSelectedIndex(selectedIndex + visible, {
-            userAction: true,
-        });
+        const visible = Math.max(1, Math.floor(listEl.clientHeight / 48));
+        const newIndex = Math.min(filteredTopics.length - 1, selectedIndex + visible);
+        updateTopicSelection(newIndex);
     } else if (e.key === "Home") {
-        collapseTopicDetails();
-        setSelectedIndex(0, { userAction: true });
+        updateTopicSelection(0);
     } else if (e.key === "End") {
-        collapseTopicDetails();
-        setSelectedIndex(filteredTopics.length - 1, { userAction: true });
+        updateTopicSelection(filteredTopics.length - 1);
     }
 }
 
@@ -767,7 +903,7 @@ function handleSearch() {
     }
     
     // Collapse details when searching
-    collapseTopicDetails();
+    collapseExpandedTopic();
     
     // Filter and re-render
     filterTopics();
@@ -906,12 +1042,102 @@ function updateExpandedNodeDetails() {
     `;
 }
 
-// Collapse expanded node
+// Collapse expanded node incrementally
 function collapseNodeDetails() {
     if (expandedNodeIndex >= 0) {
+        const items = nodeListEl.querySelectorAll('.node');
+        const expandedItem = items[expandedNodeIndex];
+        if (expandedItem) {
+            const nextSibling = expandedItem.nextElementSibling;
+            if (nextSibling && nextSibling.classList.contains('node-details')) {
+                nextSibling.remove();
+            }
+        }
         expandedNodeIndex = -1;
-        renderNodeList();
     }
+}
+
+// Update node selection without re-rendering entire list
+function updateNodeSelection(newIndex) {
+    const oldIndex = selectedNodeIndex;
+    selectedNodeIndex = newIndex;
+    
+    // Update classes on DOM elements
+    const items = nodeListEl.querySelectorAll('.node');
+    if (items[oldIndex]) {
+        items[oldIndex].classList.remove('selected');
+        items[oldIndex].setAttribute('aria-selected', 'false');
+    }
+    if (items[newIndex]) {
+        items[newIndex].classList.add('selected');
+        items[newIndex].setAttribute('aria-selected', 'true');
+        // Scroll into view
+        items[newIndex].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+}
+
+// Build node details HTML
+function buildNodeDetailsHTML(details) {
+    if (!details) {
+        return '<div class="details-section"><div class="details-loading">Loading details...</div></div>';
+    }
+    
+    return `
+        <div class="details-section">
+            <div class="details-header">Node Information</div>
+            <div class="details-grid">
+                <div class="detail-item">
+                    <span class="detail-label">Full Name:</span>
+                    <span class="detail-value monospace">${details.full_name || 'N/A'}</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Publishers:</span>
+                    <span class="detail-value">${details.publishers?.length || 0}</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Subscribers:</span>
+                    <span class="detail-value">${details.subscribers?.length || 0}</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Services:</span>
+                    <span class="detail-value">${details.services?.length || 0}</span>
+                </div>
+            </div>
+            ${details.publishers && details.publishers.length > 0 ? `
+                <div class="details-subheader">Published Topics</div>
+                <div class="details-list">
+                    ${details.publishers.map(p => `
+                        <div class="list-item">
+                            <span class="monospace topic-name">${p.topic}</span>
+                            <span class="topic-type">${p.type}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
+            ${details.subscribers && details.subscribers.length > 0 ? `
+                <div class="details-subheader">Subscribed Topics</div>
+                <div class="details-list">
+                    ${details.subscribers.map(s => `
+                        <div class="list-item">
+                            <span class="monospace topic-name">${s.topic}</span>
+                            <span class="topic-type">${s.type}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
+            ${details.services && details.services.length > 0 ? `
+                <div class="details-subheader">Services</div>
+                <div class="details-list">
+                    ${details.services.map(svc => `
+                        <div class="list-item">
+                            <span class="monospace topic-name">${svc.name}</span>
+                            <span class="topic-type">${svc.type}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
+        </div>
+    `;
 }
 
 function filterNodes() {
@@ -1036,10 +1262,12 @@ function renderNodeList() {
         item.appendChild(status);
         
         item.addEventListener("click", () => {
-            setSelectedNodeIndex(i, { userAction: true });
-            // Always collapse details on single click
-            if (expandedNodeIndex >= 0) {
+            // If clicking on already expanded node, collapse it
+            if (expandedNodeIndex === i) {
                 collapseNodeDetails();
+            } else {
+                // Just update selection without re-rendering
+                updateNodeSelection(i);
             }
             nodeListEl.focus();
         });
@@ -1047,21 +1275,35 @@ function renderNodeList() {
         // double-click -> expand details
         item.addEventListener("dblclick", async (e) => {
             e.preventDefault();
+            
+            // If this is already the expanded node, just keep it expanded
             if (expandedNodeIndex === i) {
-                // Already expanded, collapse it
-                collapseNodeDetails();
-            } else {
-                // Expand this item
-                expandedNodeIndex = i;
-                setSelectedNodeIndex(i, { userAction: false });
-                renderNodeList(); // Re-render to show loading
+                return;
+            }
+            
+            // Collapse any currently expanded node first
+            collapseNodeDetails();
+            
+            // Now expand this item
+            expandedNodeIndex = i;
+            updateNodeSelection(i);
+            
+            // Add loading details element immediately
+            const detailsRow = document.createElement("div");
+            detailsRow.className = "node-details";
+            detailsRow.innerHTML = '<div class="details-section">Loading...</div>';
+            item.insertAdjacentElement('afterend', detailsRow);
+            
+            // Fetch details
+            const details = await fetchNodeDetails(n.full_name);
+            if (details && expandedNodeIndex === i) {
+                // Update the details content
+                detailsRow.innerHTML = buildNodeDetailsHTML(details);
                 
-                // Fetch details
-                const details = await fetchNodeDetails(n.full_name);
-                if (details && expandedNodeIndex === i) {
-                    // Still expanded, render with details
-                    renderNodeList();
-                }
+                // Prevent clicks inside details from bubbling up
+                detailsRow.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                });
             }
         });
         
@@ -1078,70 +1320,7 @@ function renderNodeList() {
             });
             
             const details = nodeDetailsCache[n.full_name];
-            if (details) {
-                detailsRow.innerHTML = `
-                    <div class="details-section">
-                        <div class="details-header">Node Information</div>
-                        <div class="details-grid">
-                            <div class="detail-item">
-                                <span class="detail-label">Full Name:</span>
-                                <span class="detail-value monospace">${details.full_name || 'N/A'}</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">Publishers:</span>
-                                <span class="detail-value">${details.publishers?.length || 0}</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">Subscribers:</span>
-                                <span class="detail-value">${details.subscribers?.length || 0}</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">Services:</span>
-                                <span class="detail-value">${details.services?.length || 0}</span>
-                            </div>
-                        </div>
-                        ${details.publishers && details.publishers.length > 0 ? `
-                            <div class="details-subheader">Published Topics</div>
-                            <div class="details-list">
-                                ${details.publishers.map(p => `
-                                    <div class="list-item">
-                                        <span class="monospace topic-name">${p.topic}</span>
-                                        <span class="topic-type">${p.type}</span>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        ` : ''}
-                        ${details.subscribers && details.subscribers.length > 0 ? `
-                            <div class="details-subheader">Subscribed Topics</div>
-                            <div class="details-list">
-                                ${details.subscribers.map(s => `
-                                    <div class="list-item">
-                                        <span class="monospace topic-name">${s.topic}</span>
-                                        <span class="topic-type">${s.type}</span>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        ` : ''}
-                        ${details.services && details.services.length > 0 ? `
-                            <div class="details-subheader">Services</div>
-                            <div class="details-list">
-                                ${details.services.map(svc => `
-                                    <div class="list-item">
-                                        <span class="monospace topic-name">${svc.name}</span>
-                                        <span class="topic-type">${svc.type}</span>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        ` : ''}
-                    </div>
-                `;
-            } else {
-                detailsRow.innerHTML = `
-                    <div class="details-section">
-                        <div class="details-loading">Loading details...</div>
-                    </div>
-                `;
-            }
+            detailsRow.innerHTML = buildNodeDetailsHTML(details);
             
             nodeListEl.appendChild(detailsRow);
         }
@@ -1179,35 +1358,47 @@ function onNodeKeyDown(e) {
         }
         const nodeEnc = encodeURIComponent(n.full_name);
         
-        // optimistic UI update
+        // Optimistic UI update - toggle monitored state
+        const wasMonitored = n.monitored;
         n.monitored = !n.monitored;
         if (n.monitored) {
             n.status = "active";
         } else {
             n.status = null;
         }
-        renderNodeList();
         
-        // toggle monitored
+        // Find the node item in the DOM and update it incrementally
+        const items = nodeListEl.querySelectorAll('.node');
+        const currentItem = items[selectedNodeIndex];
+        if (currentItem) {
+            // Update status badge
+            const statusEl = currentItem.querySelector('.node-status');
+            if (statusEl) {
+                statusEl.innerHTML = '';
+                if (n.monitored) {
+                    const badge = document.createElement("span");
+                    badge.className = "badge node-status-badge status-active";
+                    badge.textContent = "active";
+                    statusEl.appendChild(badge);
+                }
+            }
+        }
+        
+        // Toggle monitored on backend
         if (!n.monitored) {
-            // after optimistic toggle we set to unmonitored, so we must DELETE
             fetch(`/api/node_monitor/${nodeEnc}`, { method: 'DELETE' })
-                .then((resp) => {
-                    return fetchNodesOnce();
-                })
                 .catch((err) => {
                     console.error('Failed to stop node monitor', err);
+                    // Revert optimistic update on error
+                    n.monitored = wasMonitored;
                     fetchNodesOnce();
                 });
         } else {
             fetch(`/api/node_monitor/${nodeEnc}`, { method: 'POST' })
-                .then(async (resp) => {
-                    const result = await resp.json();
-                    await fetchNodesOnce();
-                    const refreshedNode = filteredNodes.find(nd => nd.full_name === n.full_name);
-                })
                 .catch((err) => {
                     console.error('Failed to start node monitor', err);
+                    // Revert optimistic update on error
+                    n.monitored = wasMonitored;
                     fetchNodesOnce();
                 });
         }
@@ -1215,28 +1406,25 @@ function onNodeKeyDown(e) {
     }
     
     if (e.key === "ArrowUp") {
-        collapseNodeDetails();
-        setSelectedNodeIndex(selectedNodeIndex <= 0 ? 0 : selectedNodeIndex - 1, { userAction: true });
+        const newIndex = selectedNodeIndex <= 0 ? 0 : selectedNodeIndex - 1;
+        updateNodeSelection(newIndex);
     } else if (e.key === "ArrowDown") {
-        collapseNodeDetails();
-        setSelectedNodeIndex(
-            selectedNodeIndex >= filteredNodes.length - 1 ? filteredNodes.length - 1 : selectedNodeIndex + 1,
-            { userAction: true }
-        );
+        const newIndex = selectedNodeIndex >= filteredNodes.length - 1
+            ? filteredNodes.length - 1
+            : selectedNodeIndex + 1;
+        updateNodeSelection(newIndex);
     } else if (e.key === "PageUp") {
-        collapseNodeDetails();
         const visible = Math.max(1, Math.floor(nodeListEl.clientHeight / 48));
-        setSelectedNodeIndex(selectedNodeIndex - visible, { userAction: true });
+        const newIndex = Math.max(0, selectedNodeIndex - visible);
+        updateNodeSelection(newIndex);
     } else if (e.key === "PageDown") {
-        collapseNodeDetails();
         const visible = Math.max(1, Math.floor(nodeListEl.clientHeight / 48));
-        setSelectedNodeIndex(selectedNodeIndex + visible, { userAction: true });
+        const newIndex = Math.min(filteredNodes.length - 1, selectedNodeIndex + visible);
+        updateNodeSelection(newIndex);
     } else if (e.key === "Home") {
-        collapseNodeDetails();
-        setSelectedNodeIndex(0, { userAction: true });
+        updateNodeSelection(0);
     } else if (e.key === "End") {
-        collapseNodeDetails();
-        setSelectedNodeIndex(filteredNodes.length - 1, { userAction: true });
+        updateNodeSelection(filteredNodes.length - 1);
     }
 }
 
@@ -1319,7 +1507,7 @@ refreshBtn.addEventListener("click", () => fetchTopicsOnce());
 // Monitored toggle button (checkbox)
 monitoredToggleBtn.addEventListener("change", () => {
     showMonitoredOnly = monitoredToggleBtn.checked;
-    collapseTopicDetails(); // Collapse details when filtering
+    collapseExpandedTopic(); // Collapse details when filtering
     filterTopics();
     selectedIndex = filteredTopics.length > 0 ? 0 : -1;
     renderList();
