@@ -652,11 +652,3 @@ h1 {
 .node-header .header-cell:last-child {
     justify-content: center;
 }
-/* Footer */
-.page-footer {
-    text-align: center;
-    color: var(--muted);
-    font-size: 14px;
-    padding: 16px 0;
-    margin-top: 8px;
-}
