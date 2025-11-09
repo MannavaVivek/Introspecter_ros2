@@ -1,11 +1,6 @@
-// ======= CONFIG =======
-// Set API_URL to the endpoint that returns topic listing.
-// Acceptable response shapes:
-// 1) ["topic1", "topic2", ...]
-// 2) {"topics": ["topic1", ...]}
-// 3) {"topic1": {...}, "topic2": {...}} -> uses Object.keys()
-// Use a relative URL so the browser won't trigger CORS when the frontend is
-// served from the same host/port (127.0.0.1 vs localhost differences).
+//static/app.js
+
+// ======= Configuration =======
 const API_URL = "/api/topics"; // change if your backend uses another path or host
 const NODES_API_URL = "/api/nodes"; // API endpoint for nodes
 
@@ -33,6 +28,9 @@ let expandedNodeIndex = -1; // index of expanded node (-1 means none)
 let nodeDetailsCache = {}; // cache for node details
 let showMonitoredNodesOnly = false; // filter to show only monitored nodes
 
+// Modal state
+let modalOpen = false;
+
 const listEl = document.getElementById("list");
 const statusEl = document.getElementById("status");
 const emptyEl = document.getElementById("empty");
@@ -53,12 +51,74 @@ const nodeSearchToggleBtn = document.getElementById("nodeSearchToggle");
 const nodeMonitoredToggleBtn = document.getElementById("nodeMonitoredToggle");
 let isNodeSearchExpanded = false;
 
+// Modal elements (will be initialized after DOM loads)
+let detailsModal = null;
+let modalBody = null;
+
 // ======= Helpers =======
 function setStatus(s) {
     statusEl.textContent = s;
 }
 function clamp(i, min, max) {
     return Math.max(min, Math.min(max, i));
+}
+
+// Modal helper functions
+function showModal(content) {
+    if (!detailsModal || !modalBody) {
+        detailsModal = document.getElementById("detailsModal");
+        modalBody = document.getElementById("modalBody");
+    }
+    if (!detailsModal || !modalBody) {
+        console.error("Modal elements not found in DOM. Make sure the modal HTML exists.");
+        return;
+    }
+    modalBody.innerHTML = content;
+    detailsModal.style.display = "flex";
+    modalOpen = true;
+    // Prevent body scrolling when modal is open
+    document.body.style.overflow = "hidden";
+}
+
+function hideModal() {
+    if (!detailsModal) {
+        detailsModal = document.getElementById("detailsModal");
+    }
+    if (!detailsModal) {
+        console.error("Modal element not found in DOM");
+        return;
+    }
+    detailsModal.style.display = "none";
+    modalOpen = false;
+    document.body.style.overflow = "";
+}
+
+// Set up modal event listeners (called once on initialization)
+function initModalHandlers() {
+    // Get modal elements if not already cached
+    if (!detailsModal) {
+        detailsModal = document.getElementById("detailsModal");
+        modalBody = document.getElementById("modalBody");
+    }
+    if (!detailsModal) {
+        console.error("Cannot initialize modal handlers - modal not found in DOM");
+        return;
+    }
+    
+    // Close on click outside modal content
+    detailsModal.addEventListener("click", (e) => {
+        if (e.target === detailsModal) {
+            hideModal();
+        }
+    });
+    
+    // Close on any key press
+    document.addEventListener("keydown", (e) => {
+        if (modalOpen) {
+            e.preventDefault();
+            hideModal();
+        }
+    });
 }
 
 // Update only the rate values without full re-render (when editing)
@@ -132,27 +192,6 @@ async function fetchTopicDetails(topicName, forceRefresh = false) {
     } catch (err) {
         console.error("Failed to fetch topic details:", err);
         return null;
-    }
-}
-
-// Update the expanded topic details without full re-render
-function updateExpandedTopicDetails() {
-    // With multiple expansions, just update rates which is faster
-    updateRatesOnly();
-}
-
-// Collapse the currently expanded topic incrementally
-function collapseExpandedTopic() {
-    if (expandedTopicIndex >= 0) {
-        const items = listEl.querySelectorAll('.topic');
-        const expandedItem = items[expandedTopicIndex];
-        if (expandedItem) {
-            const nextSibling = expandedItem.nextElementSibling;
-            if (nextSibling && nextSibling.classList.contains('topic-details')) {
-                nextSibling.remove();
-            }
-        }
-        expandedTopicIndex = -1;
     }
 }
 
@@ -323,15 +362,9 @@ async function fetchTopicsOnce() {
             selectedIndex = -1;
         }
 
-        // If details are expanded, only update rates to avoid flashing
-        if (expandedTopicIndex >= 0) {
+        // When modal is open, just update rates without re-rendering
+        if (modalOpen) {
             updateRatesOnly();
-            // Also refresh the expanded topic
-            const expandedTopic = filteredTopics[expandedTopicIndex];
-            if (expandedTopic) {
-                await fetchTopicDetails(expandedTopic.topic, true); // Force refresh
-            }
-            updateExpandedTopicDetails();
         } else {
             renderList();
         }
@@ -521,67 +554,32 @@ function renderList() {
             // Don't trigger if clicking on input field
             if (e.target.classList.contains('expected-rate-input')) return;
             
-            // If clicking on already expanded topic, collapse it
-            if (expandedTopicIndex === i) {
-                collapseExpandedTopic();
-            } else {
-                // Just update selection without re-rendering
-                updateTopicSelection(i);
-            }
+            // Just update selection without re-rendering
+            updateTopicSelection(i);
         });
 
-        // double-click -> expand details
+        // double-click -> show details in modal
         item.addEventListener("dblclick", async (e) => {
             e.preventDefault();
+            e.stopPropagation();
             
-            // If this is already the expanded topic, just keep it expanded
-            if (expandedTopicIndex === i) {
-                return;
-            }
-            
-            // Collapse any currently expanded topic first
-            collapseExpandedTopic();
-            
-            // Now expand this item
-            expandedTopicIndex = i;
+            // Update selection
             updateTopicSelection(i);
             
-            // Add loading details element immediately
-            const detailsRow = document.createElement("div");
-            detailsRow.className = "topic-details";
-            detailsRow.innerHTML = '<div class="details-section">Loading...</div>';
-            item.insertAdjacentElement('afterend', detailsRow);
+            // Show modal with loading state
+            showModal('<div class="details-section">Loading topic details...</div>');
             
             // Fetch details
             const details = await fetchTopicDetails(t.topic);
-            if (details && expandedTopicIndex === i) {
-                // Update the details content
-                detailsRow.innerHTML = buildTopicDetailsHTML(details);
-                
-                // Prevent clicks inside details from bubbling up
-                detailsRow.addEventListener("click", (e) => {
-                    e.stopPropagation();
-                });
+            if (details && modalOpen) {
+                // Update the modal content with the fetched details
+                if (modalBody) {
+                    modalBody.innerHTML = buildTopicDetailsHTML(details);
+                }
             }
         });
 
         listEl.appendChild(item);
-        
-        // Add expanded details section if this is the expanded item
-        if (expandedTopicIndex === i) {
-            const detailsRow = document.createElement("div");
-            detailsRow.className = "topic-details";
-            
-            // Prevent clicks inside details from bubbling up
-            detailsRow.addEventListener("click", (e) => {
-                e.stopPropagation();
-            });
-            
-            const details = topicDetailsCache[t.topic];
-            detailsRow.innerHTML = buildTopicDetailsHTML(details);
-            
-            listEl.appendChild(detailsRow);
-        }
     });
 
     // ensure selected is visible
@@ -897,9 +895,6 @@ function handleSearch() {
         clearSearchBtn.style.display = 'none';
     }
     
-    // Collapse details when searching
-    collapseExpandedTopic();
-    
     // Filter and re-render
     filterTopics();
     selectedIndex = filteredTopics.length > 0 ? 0 : -1;
@@ -976,91 +971,6 @@ async function fetchNodeDetails(nodeName, forceRefresh = false) {
     }
 }
 
-// Update the expanded node details without full re-render
-function updateExpandedNodeDetails() {
-    if (expandedNodeIndex < 0 || expandedNodeIndex >= filteredNodes.length) return;
-    
-    const n = filteredNodes[expandedNodeIndex];
-    const details = nodeDetailsCache[n.full_name];
-    if (!details) return;
-    
-    // Find the details element in the DOM
-    const detailsEl = nodeListEl.querySelector('.node-details');
-    if (!detailsEl) return;
-    
-    // Update the details content
-    detailsEl.innerHTML = `
-        <div class="details-section">
-            <div class="details-header">Node Information</div>
-            <div class="details-grid">
-                <div class="detail-item">
-                    <span class="detail-label">Full Name:</span>
-                    <span class="detail-value monospace">${details.full_name || 'N/A'}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Publishers:</span>
-                    <span class="detail-value">${details.publishers?.length || 0}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Subscribers:</span>
-                    <span class="detail-value">${details.subscribers?.length || 0}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Services:</span>
-                    <span class="detail-value">${details.services?.length || 0}</span>
-                </div>
-            </div>
-            ${details.publishers && details.publishers.length > 0 ? `
-                <div class="details-subheader">Published Topics</div>
-                <div class="details-list">
-                    ${details.publishers.map(p => `
-                        <div class="list-item">
-                            <span class="monospace topic-name">${p.topic}</span>
-                            <span class="topic-type">${p.type}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            ` : ''}
-            ${details.subscribers && details.subscribers.length > 0 ? `
-                <div class="details-subheader">Subscribed Topics</div>
-                <div class="details-list">
-                    ${details.subscribers.map(s => `
-                        <div class="list-item">
-                            <span class="monospace topic-name">${s.topic}</span>
-                            <span class="topic-type">${s.type}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            ` : ''}
-            ${details.services && details.services.length > 0 ? `
-                <div class="details-subheader">Services</div>
-                <div class="details-list">
-                    ${details.services.map(svc => `
-                        <div class="list-item">
-                            <span class="monospace topic-name">${svc.name}</span>
-                            <span class="topic-type">${svc.type}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            ` : ''}
-        </div>
-    `;
-}
-
-// Collapse expanded node incrementally
-function collapseNodeDetails() {
-    if (expandedNodeIndex >= 0) {
-        const items = nodeListEl.querySelectorAll('.node');
-        const expandedItem = items[expandedNodeIndex];
-        if (expandedItem) {
-            const nextSibling = expandedItem.nextElementSibling;
-            if (nextSibling && nextSibling.classList.contains('node-details')) {
-                nextSibling.remove();
-            }
-        }
-        expandedNodeIndex = -1;
-    }
-}
 
 // Update node selection without re-rendering entire list
 function updateNodeSelection(newIndex) {
@@ -1192,16 +1102,8 @@ async function fetchNodesOnce() {
             selectedNodeIndex = -1;
         }
         
-        // If details are expanded, don't re-render to avoid flashing
-        if (expandedNodeIndex >= 0) {
-            // Refresh the expanded node details
-            const expandedNode = filteredNodes[expandedNodeIndex];
-            if (expandedNode) {
-                await fetchNodeDetails(expandedNode.full_name, true); // Force refresh
-                // Re-render just the details section
-                updateExpandedNodeDetails();
-            }
-        } else {
+        // When modal is open, don't re-render list
+        if (!modalOpen) {
             renderNodeList();
         }
     } catch (err) {
@@ -1267,68 +1169,31 @@ function renderNodeList() {
         item.appendChild(status);
         
         item.addEventListener("click", () => {
-            // If clicking on already expanded node, collapse it
-            if (expandedNodeIndex === i) {
-                collapseNodeDetails();
-            } else {
-                // Just update selection without re-rendering
-                updateNodeSelection(i);
-            }
+            // Just update selection without re-rendering
+            updateNodeSelection(i);
             nodeListEl.focus();
         });
         
-        // double-click -> expand details
+        // double-click -> show details in modal
         item.addEventListener("dblclick", async (e) => {
             e.preventDefault();
+            e.stopPropagation();
             
-            // If this is already the expanded node, just keep it expanded
-            if (expandedNodeIndex === i) {
-                return;
-            }
-            
-            // Collapse any currently expanded node first
-            collapseNodeDetails();
-            
-            // Now expand this item
-            expandedNodeIndex = i;
+            // Update selection
             updateNodeSelection(i);
             
-            // Add loading details element immediately
-            const detailsRow = document.createElement("div");
-            detailsRow.className = "node-details";
-            detailsRow.innerHTML = '<div class="details-section">Loading...</div>';
-            item.insertAdjacentElement('afterend', detailsRow);
+            // Show modal with loading state
+            showModal('<div class="details-section">Loading node details...</div>');
             
             // Fetch details
             const details = await fetchNodeDetails(n.full_name);
-            if (details && expandedNodeIndex === i) {
-                // Update the details content
-                detailsRow.innerHTML = buildNodeDetailsHTML(details);
-                
-                // Prevent clicks inside details from bubbling up
-                detailsRow.addEventListener("click", (e) => {
-                    e.stopPropagation();
-                });
+            if (details && modalOpen) {
+                // Update the modal content with the fetched details
+                modalBody.innerHTML = buildNodeDetailsHTML(details);
             }
         });
         
         nodeListEl.appendChild(item);
-        
-        // Add expanded details section if this is the expanded item
-        if (i === expandedNodeIndex) {
-            const detailsRow = document.createElement("div");
-            detailsRow.className = "node-details";
-            
-            // Prevent clicks inside details from bubbling up
-            detailsRow.addEventListener("click", (e) => {
-                e.stopPropagation();
-            });
-            
-            const details = nodeDetailsCache[n.full_name];
-            detailsRow.innerHTML = buildNodeDetailsHTML(details);
-            
-            nodeListEl.appendChild(detailsRow);
-        }
     });
     
     ensureSelectedNodeInView();
@@ -1473,9 +1338,6 @@ function handleNodeSearch() {
         nodeClearSearchBtn.style.display = 'none';
     }
     
-    // Collapse details when searching
-    collapseNodeDetails();
-    
     filterNodes();
     selectedNodeIndex = filteredNodes.length > 0 ? 0 : -1;
     renderNodeList();
@@ -1507,7 +1369,6 @@ refreshBtn.addEventListener("click", () => fetchTopicsOnce());
 // Monitored toggle button (checkbox)
 monitoredToggleBtn.addEventListener("change", () => {
     showMonitoredOnly = monitoredToggleBtn.checked;
-    collapseExpandedTopic(); // Collapse details when filtering
     filterTopics();
     selectedIndex = filteredTopics.length > 0 ? 0 : -1;
     renderList();
@@ -1562,6 +1423,16 @@ document.addEventListener("click", (e) => {
 window.addEventListener("load", () => {
     listEl.focus();
     startPolling();
+    initModalHandlers(); // Initialize modal event handlers
+    
+    // Test that modal exists
+    const testModal = document.getElementById("detailsModal");
+    const testBody = document.getElementById("modalBody");
+    console.log("Modal elements on load:", {
+        modalExists: !!testModal,
+        bodyExists: !!testBody,
+        modalDisplay: testModal ? window.getComputedStyle(testModal).display : 'N/A'
+    });
 });
 
 // also stop polling if tab hidden to reduce load (nice-to-have)
@@ -1596,7 +1467,6 @@ nodeSearchToggleBtn.addEventListener("click", () => {
 // Node monitored toggle button (checkbox)
 nodeMonitoredToggleBtn.addEventListener("change", () => {
     showMonitoredNodesOnly = nodeMonitoredToggleBtn.checked;
-    collapseNodeDetails(); // Collapse details when filtering
     filterNodes();
     selectedNodeIndex = filteredNodes.length > 0 ? 0 : -1;
     renderNodeList();

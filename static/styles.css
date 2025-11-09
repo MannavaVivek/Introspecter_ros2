@@ -509,27 +509,77 @@ h1 {
     box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.08);
     outline: none;
 }
-/* Expandable Details Styles */
-.topic-details,
-.node-details {
-    margin: 6px;
-    padding: 16px;
-    background: rgba(6, 182, 212, 0.03);
-    border: 1px solid rgba(6, 182, 212, 0.15);
-    border-radius: 6px;
-    animation: slideDown 0.2s ease-out;
-    flex-shrink: 0;
+/* Modal Styles */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    display: none; /* Hidden by default */
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    animation: fadeIn 0.2s ease-out;
 }
 
-@keyframes slideDown {
+@keyframes fadeIn {
     from {
         opacity: 0;
-        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.modal-content {
+    background: var(--bg);
+    border: 1px solid rgba(6, 182, 212, 0.3);
+    border-radius: 8px;
+    padding: 30px;
+    min-width: 500px;
+    max-width: 900px;
+    width: 80vw;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
     }
     to {
         opacity: 1;
         transform: translateY(0);
     }
+}
+
+.modal-body {
+    color: var(--white);
+}
+
+/* Custom scrollbar for modal */
+.modal-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.modal-content::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+}
+
+.modal-content::-webkit-scrollbar-thumb {
+    background: rgba(6, 182, 212, 0.5);
+    border-radius: 4px;
+}
+
+.modal-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(6, 182, 212, 0.7);
 }
 
 .details-section {

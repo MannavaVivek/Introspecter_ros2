@@ -4,9 +4,10 @@
         <meta charset="utf-8" />
         <title>ROS2 Browser</title>
         <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=2.0">
     </head>
     <body>
+    <!-- Version 2.0 - Modal Implementation -->
         <div class="app" role="application" aria-labelledby="title">
             <div class="tabs-container">
                 <button class="tab active" data-tab="topics">ROS2 Topic Browser</button>
@@ -110,6 +111,15 @@
             </div>
         </div>
 
-    <script src="/static/app.js" defer></script>
+    <!-- Modal for details -->
+    <div id="detailsModal" class="modal-overlay">
+        <div class="modal-content">
+            <div id="modalBody" class="modal-body">
+                <!-- Content will be inserted here -->
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=2.0" defer></script>
     </body>
 </html>
