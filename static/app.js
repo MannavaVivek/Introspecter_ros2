@@ -31,6 +31,7 @@ let nodeSearchQuery = "";
 let nodesPollTimer = null;
 let expandedNodeIndex = -1; // index of expanded node (-1 means none)
 let nodeDetailsCache = {}; // cache for node details
+let showMonitoredNodesOnly = false; // filter to show only monitored nodes
 
 const listEl = document.getElementById("list");
 const statusEl = document.getElementById("status");
@@ -49,6 +50,7 @@ const nodeEmptyEl = document.getElementById("nodeEmpty");
 const nodeSearchInput = document.getElementById("nodeSearchInput");
 const nodeClearSearchBtn = document.getElementById("nodeClearSearch");
 const nodeSearchToggleBtn = document.getElementById("nodeSearchToggle");
+const nodeMonitoredToggleBtn = document.getElementById("nodeMonitoredToggle");
 let isNodeSearchExpanded = false;
 
 // ======= Helpers =======
@@ -913,14 +915,21 @@ function collapseNodeDetails() {
 }
 
 function filterNodes() {
+    let result = nodes;
+    
+    // Apply search filter
     if (nodeSearchQuery) {
-        filteredNodes = nodes.filter(n => 
+        result = result.filter(n => 
             n.full_name.toLowerCase().includes(nodeSearchQuery.toLowerCase()) ||
             n.name.toLowerCase().includes(nodeSearchQuery.toLowerCase())
         );
-    } else {
-        filteredNodes = nodes;
     }
+    // Apply monitored filter if toggle is on and search is NOT active
+    else if (showMonitoredNodesOnly) {
+        result = result.filter(n => n.monitored);
+    }
+    
+    filteredNodes = result;
     
     // Reset selection when filter changes
     if (selectedNodeIndex >= filteredNodes.length) {
@@ -1387,6 +1396,15 @@ nodeListEl.addEventListener("keydown", (e) => {
 // Node search toggle button
 nodeSearchToggleBtn.addEventListener("click", () => {
     expandNodeSearch();
+});
+
+// Node monitored toggle button (checkbox)
+nodeMonitoredToggleBtn.addEventListener("change", () => {
+    showMonitoredNodesOnly = nodeMonitoredToggleBtn.checked;
+    collapseNodeDetails(); // Collapse details when filtering
+    filterNodes();
+    selectedNodeIndex = filteredNodes.length > 0 ? 0 : -1;
+    renderNodeList();
 });
 
 // Node search input events
