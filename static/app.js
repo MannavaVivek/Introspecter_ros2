@@ -556,6 +556,7 @@ function renderList() {
             
             // Just update selection without re-rendering
             updateTopicSelection(i);
+            listEl.focus();
         });
 
         // double-click -> show details in modal
@@ -1372,6 +1373,7 @@ monitoredToggleBtn.addEventListener("change", () => {
     filterTopics();
     selectedIndex = filteredTopics.length > 0 ? 0 : -1;
     renderList();
+    listEl.focus();
 });
 
 // Search toggle button
@@ -1470,6 +1472,7 @@ nodeMonitoredToggleBtn.addEventListener("change", () => {
     filterNodes();
     selectedNodeIndex = filteredNodes.length > 0 ? 0 : -1;
     renderNodeList();
+    nodeListEl.focus();
 });
 
 // Node search input events
