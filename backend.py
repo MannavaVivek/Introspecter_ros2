@@ -9,6 +9,7 @@ from pathlib import Path
 import importlib
 import logging
 import threading
+import json
 from rclpy.qos import QoSProfile
 
 # -------------------------------
@@ -243,6 +244,7 @@ app.add_middleware(
 
 # Serve static files (frontend)
 STATIC_DIR = Path(__file__).parent / "static"
+CONFIG_FILE = Path(__file__).parent / "monitor_config.json"
 # Mount static files under /static so API routes (e.g. /api/topics) are not
 # intercepted by the static file handler. Serve index.html at root explicitly.
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -256,6 +258,113 @@ node = None
 _spin_thread = None
 
 
+# -------------------------------
+# Configuration Management
+# -------------------------------
+def save_config():
+    """Save the current monitoring configuration to disk."""
+    global node
+    if node is None:
+        return
+    
+    config = {
+        "monitored_topics": []
+    }
+    
+    # Save all monitored topics with their types and expected rates
+    for topic_name in node._topic_subscriptions.keys():
+        # Get topic type
+        topics = node.get_topic_names_and_types()
+        topic_type = None
+        for name, types in topics:
+            if name == topic_name and types:
+                topic_type = types[0]
+                break
+        
+        entry = {
+            "topic": topic_name,
+            "type": topic_type,
+        }
+        
+        # Add expected rate if set
+        if topic_name in node.monitors and node.monitors[topic_name].expected_rate_hz is not None:
+            entry["expected_rate_hz"] = node.monitors[topic_name].expected_rate_hz
+        
+        config["monitored_topics"].append(entry)
+    
+    # Also save expected rates for topics that aren't currently monitored
+    for topic_name, monitor in node.monitors.items():
+        if topic_name not in node._topic_subscriptions and monitor.expected_rate_hz is not None:
+            # Get topic type
+            topics = node.get_topic_names_and_types()
+            topic_type = None
+            for name, types in topics:
+                if name == topic_name and types:
+                    topic_type = types[0]
+                    break
+            
+            config["monitored_topics"].append({
+                "topic": topic_name,
+                "type": topic_type,
+                "expected_rate_hz": monitor.expected_rate_hz,
+                "monitored": False
+            })
+    
+    try:
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=2)
+        logging.getLogger('topic_list_node').info(f"Saved configuration to {CONFIG_FILE}")
+    except Exception as e:
+        logging.getLogger('topic_list_node').error(f"Failed to save config: {e}")
+
+
+def load_config():
+    """Load and apply the monitoring configuration from disk."""
+    global node
+    if node is None:
+        return
+    
+    if not CONFIG_FILE.exists():
+        logging.getLogger('topic_list_node').info("No config file found, starting fresh")
+        return
+    
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            config = json.load(f)
+        
+        monitored_topics = config.get("monitored_topics", [])
+        logging.getLogger('topic_list_node').info(f"Loading {len(monitored_topics)} topics from config")
+        
+        for entry in monitored_topics:
+            topic = entry.get("topic")
+            topic_type = entry.get("type")
+            expected_rate = entry.get("expected_rate_hz")
+            should_monitor = entry.get("monitored", True)
+            
+            if not topic:
+                continue
+            
+            # Set expected rate if provided
+            if expected_rate is not None:
+                if topic not in node.monitors:
+                    node.monitors[topic] = TopicMonitor(topic, expected_rate)
+                else:
+                    node.monitors[topic].expected_rate_hz = expected_rate
+            
+            # Start monitoring if configured to do so
+            if should_monitor:
+                try:
+                    node.add_topic_monitor(topic, topic_type)
+                except Exception as e:
+                    logging.getLogger('topic_list_node').warning(
+                        f"Failed to restore monitoring for {topic}: {e}"
+                    )
+        
+        logging.getLogger('topic_list_node').info("Configuration loaded successfully")
+    except Exception as e:
+        logging.getLogger('topic_list_node').error(f"Failed to load config: {e}")
+
+
 @app.on_event("startup")
 def on_startup():
     global node
@@ -266,6 +375,14 @@ def on_startup():
     _spin_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
     _spin_thread.start()
     node.get_logger().info("ROS2 topic list node started")
+    
+    # Load saved configuration after a brief delay to allow topic discovery
+    def delayed_config_load():
+        time.sleep(0.5)  # Give time for initial topic discovery
+        load_config()
+    
+    config_thread = threading.Thread(target=delayed_config_load, daemon=True)
+    config_thread.start()
 
 
 @app.on_event("shutdown")
@@ -316,6 +433,7 @@ def start_monitor(topic: str):
     try:
         started = node.add_topic_monitor(topic, topic_type)
         if started:
+            save_config()  # Save config after starting monitor
             return JSONResponse({"topic": topic, "monitored": True})
         else:
             logging.getLogger('topic_list_node').warning(f"add_topic_monitor returned False for {topic}")
@@ -335,10 +453,12 @@ def set_expected_rate(topic: str, expected_rate_hz: float):
     # Check if topic is being monitored
     if topic in node.monitors:
         node.monitors[topic].expected_rate_hz = expected_rate_hz
+        save_config()  # Save config after setting expected rate
         return JSONResponse({"topic": topic, "expected_rate_hz": expected_rate_hz})
     else:
         # Create a monitor entry even if not subscribed yet, to preserve the expected rate
         node.monitors[topic] = TopicMonitor(topic, expected_rate_hz)
+        save_config()  # Save config after setting expected rate
         return JSONResponse({"topic": topic, "expected_rate_hz": expected_rate_hz})
 
 
@@ -351,6 +471,7 @@ def delete_expected_rate(topic: str):
     
     if topic in node.monitors:
         node.monitors[topic].expected_rate_hz = None
+        save_config()  # Save config after deleting expected rate
         return JSONResponse({"topic": topic, "expected_rate_hz": None})
     else:
         return JSONResponse({"error": f"Topic {topic} not found in monitors"}, status_code=404)
@@ -364,6 +485,7 @@ def stop_monitor(topic: str):
     try:
         removed = node.remove_topic_monitor(topic)
         if removed:
+            save_config()  # Save config after stopping monitor
             return JSONResponse({"topic": topic, "monitored": False})
         else:
             return JSONResponse({"error": f"Topic {topic} was not being monitored"}, status_code=404)
