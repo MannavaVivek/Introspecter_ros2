@@ -245,7 +245,7 @@ class TopicListNode(Node):
         for name, types in topics:
             # Check if topic has any active publishers
             publishers_info = self.get_publishers_info_by_topic(name)
-            if not publishers_info:
+            if not publishers_info and name not in self.monitors:
                 # Skip topics with no active publishers
                 continue
                 
