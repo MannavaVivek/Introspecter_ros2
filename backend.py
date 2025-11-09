@@ -108,14 +108,52 @@ class TopicMonitor:
         }
 
 
+class NodeMonitor:
+    def __init__(self, node_name, namespace="/"):
+        self.node_name = node_name
+        self.namespace = namespace
+        self.full_name = f"{namespace}/{node_name}".replace("//", "/")
+        self.last_seen = time.time()
+        self.status = "active"  # active, MIA
+        self.mia_timeout_sec = 3.0  # Consider MIA after 3 seconds
+    
+    def update_status(self, is_alive):
+        """Update the node's status based on whether it's still alive."""
+        if is_alive:
+            self.last_seen = time.time()
+            self.status = "active"
+        else:
+            elapsed = time.time() - self.last_seen
+            if elapsed > self.mia_timeout_sec:
+                self.status = "MIA"
+    
+    def get_status(self):
+        """Get the current status of the node."""
+        elapsed = time.time() - self.last_seen
+        if elapsed > self.mia_timeout_sec:
+            self.status = "MIA"
+        return {
+            "node_name": self.node_name,
+            "namespace": self.namespace,
+            "full_name": self.full_name,
+            "status": self.status,
+            "last_seen": self.last_seen,
+        }
+
+
 class TopicListNode(Node):
     def __init__(self):
-        super().__init__("topic_list_node")
+        super().__init__("introspection_node")
         self.monitors = {}
         # store subscriptions so we can destroy them when unmonitoring
         # use a private name that won't clash with rclpy.Node internals
         self._topic_subscriptions = {}
         self.qos = QoSProfile(depth=10)
+        
+        # Node monitoring
+        self.node_monitors = {}  # dict of full_name -> NodeMonitor
+        self._node_check_timer = None
+        self._start_node_health_check()
 
     def add_topic_monitor(self, topic_name, topic_type=None):
         """
@@ -135,7 +173,7 @@ class TopicListNode(Node):
                     break
 
         if topic_type is None:
-            logging.getLogger('topic_list_node').warning(
+            logging.getLogger('introspection_node').warning(
                 f"Cannot determine type for topic {topic_name}; skipping monitor"
             )
             return False
@@ -159,7 +197,7 @@ class TopicListNode(Node):
                 type_name = parts[-1]
                 msg_type = getattr(module, type_name)
         except Exception as e:
-            logging.getLogger('topic_list_node').warning(
+            logging.getLogger('introspection_node').warning(
                 f"Could not resolve message type for {topic_name}: {topic_type} ({e})"
             )
 
@@ -224,6 +262,52 @@ class TopicListNode(Node):
                 }
             )
         return result
+    
+    def _start_node_health_check(self):
+        """Start periodic health check for monitored nodes."""
+        self._node_check_timer = self.create_timer(1.0, self._check_node_health)
+    
+    def _check_node_health(self):
+        """Periodically check if monitored nodes are still alive."""
+        if not self.node_monitors:
+            return
+        
+        # Get current list of nodes
+        current_nodes = self.get_node_names_and_namespaces()
+        current_node_set = set()
+        for name, namespace in current_nodes:
+            full_name = f"{namespace}/{name}".replace("//", "/")
+            current_node_set.add(full_name)
+        
+        # Update status of monitored nodes
+        for full_name, monitor in self.node_monitors.items():
+            is_alive = full_name in current_node_set
+            monitor.update_status(is_alive)
+    
+    def add_node_monitor(self, node_name, namespace="/"):
+        """Start monitoring a node."""
+        full_name = f"{namespace}/{node_name}".replace("//", "/")
+        
+        if full_name not in self.node_monitors:
+            self.node_monitors[full_name] = NodeMonitor(node_name, namespace)
+            self.get_logger().info(f"Started monitoring node {full_name}")
+            return True
+        return False
+    
+    def remove_node_monitor(self, full_name):
+        """Stop monitoring a node."""
+        if full_name in self.node_monitors:
+            del self.node_monitors[full_name]
+            self.get_logger().info(f"Stopped monitoring node {full_name}")
+            return True
+        return False
+    
+    def get_monitored_nodes(self):
+        """Get status of all monitored nodes."""
+        result = []
+        for full_name, monitor in self.node_monitors.items():
+            result.append(monitor.get_status())
+        return result
 
 
 # -------------------------------
@@ -268,7 +352,8 @@ def save_config():
         return
     
     config = {
-        "monitored_topics": []
+        "monitored_topics": [],
+        "monitored_nodes": []
     }
     
     # Save all monitored topics with their types and expected rates
@@ -310,12 +395,20 @@ def save_config():
                 "monitored": False
             })
     
+    # Save all monitored nodes
+    for full_name, node_monitor in node.node_monitors.items():
+        config["monitored_nodes"].append({
+            "full_name": full_name,
+            "name": node_monitor.node_name,
+            "namespace": node_monitor.namespace,
+        })
+    
     try:
         with open(CONFIG_FILE, 'w') as f:
             json.dump(config, f, indent=2)
-        logging.getLogger('topic_list_node').info(f"Saved configuration to {CONFIG_FILE}")
+        logging.getLogger('introspection_node').info(f"Saved configuration to {CONFIG_FILE}")
     except Exception as e:
-        logging.getLogger('topic_list_node').error(f"Failed to save config: {e}")
+        logging.getLogger('introspection_node').error(f"Failed to save config: {e}")
 
 
 def load_config():
@@ -325,7 +418,7 @@ def load_config():
         return
     
     if not CONFIG_FILE.exists():
-        logging.getLogger('topic_list_node').info("No config file found, starting fresh")
+        logging.getLogger('introspection_node').info("No config file found, starting fresh")
         return
     
     try:
@@ -333,8 +426,10 @@ def load_config():
             config = json.load(f)
         
         monitored_topics = config.get("monitored_topics", [])
-        logging.getLogger('topic_list_node').info(f"Loading {len(monitored_topics)} topics from config")
+        monitored_nodes = config.get("monitored_nodes", [])
+        logging.getLogger('introspection_node').info(f"Loading {len(monitored_topics)} topics from config")
         
+        # Load monitored topics
         for entry in monitored_topics:
             topic = entry.get("topic")
             topic_type = entry.get("type")
@@ -356,13 +451,28 @@ def load_config():
                 try:
                     node.add_topic_monitor(topic, topic_type)
                 except Exception as e:
-                    logging.getLogger('topic_list_node').warning(
+                    logging.getLogger('introspection_node').warning(
                         f"Failed to restore monitoring for {topic}: {e}"
                     )
         
-        logging.getLogger('topic_list_node').info("Configuration loaded successfully")
+        # Load monitored nodes
+        for entry in monitored_nodes:
+            node_name = entry.get("name")
+            namespace = entry.get("namespace", "/")
+            
+            if not node_name:
+                continue
+            
+            try:
+                node.add_node_monitor(node_name, namespace)
+            except Exception as e:
+                logging.getLogger('introspection_node').warning(
+                    f"Failed to restore node monitoring for {node_name}: {e}"
+                )
+        
+        logging.getLogger('introspection_node').info("Configuration loaded successfully")
     except Exception as e:
-        logging.getLogger('topic_list_node').error(f"Failed to load config: {e}")
+        logging.getLogger('introspection_node').error(f"Failed to load config: {e}")
 
 
 @app.on_event("startup")
@@ -436,10 +546,10 @@ def start_monitor(topic: str):
             save_config()  # Save config after starting monitor
             return JSONResponse({"topic": topic, "monitored": True})
         else:
-            logging.getLogger('topic_list_node').warning(f"add_topic_monitor returned False for {topic}")
+            logging.getLogger('introspection_node').warning(f"add_topic_monitor returned False for {topic}")
             return JSONResponse({"error": f"Could not start monitor for {topic}"}, status_code=500)
     except Exception as e:
-        logging.getLogger('topic_list_node').exception(f"Failed to start monitor for {topic}")
+        logging.getLogger('introspection_node').exception(f"Failed to start monitor for {topic}")
         return JSONResponse({"error": f"Failed to start monitor for {topic}: {e}"}, status_code=500)
 
 
@@ -490,7 +600,7 @@ def stop_monitor(topic: str):
         else:
             return JSONResponse({"error": f"Topic {topic} was not being monitored"}, status_code=404)
     except Exception as e:
-        logging.getLogger('topic_list_node').exception(f"Failed to stop monitor for {topic}")
+        logging.getLogger('introspection_node').exception(f"Failed to stop monitor for {topic}")
         return JSONResponse({"error": f"Failed to stop monitor for {topic}: {e}"}, status_code=500)
 
 
@@ -525,9 +635,11 @@ def get_nodes():
     try:
         nodes_with_ns = node.get_node_names_and_namespaces()
         
+        seen_full_names = set()
         result = []
+        
+        # Add all active nodes
         for name, namespace in nodes_with_ns:
-            # Filter out internal ROS2 nodes (CLI daemon, etc.)
             if name.startswith('_ros2cli'):
                 continue
             
@@ -538,20 +650,109 @@ def get_nodes():
             
             full_name = f"{clean_namespace}/{name}" if clean_namespace else f"/{name}"
             full_name = full_name.replace("//", "/")
+            seen_full_names.add(full_name)
+            
+            # Check if node is monitored
+            monitored = full_name in node.node_monitors
+            status = None
+            if monitored:
+                node_status = node.node_monitors[full_name].get_status()
+                status = node_status["status"]
             
             result.append({
                 "name": name,
                 "namespace": namespace,
                 "full_name": full_name,
+                "monitored": monitored,
+                "status": status,
             })
+        
+        # Add monitored nodes that are MIA (not in active node list)
+        for full_name, monitor in node.node_monitors.items():
+            if full_name not in seen_full_names:
+                node_status = monitor.get_status()
+                logging.getLogger('Neura_topic_monitor').info(
+                    f"Adding MIA node: {full_name}, status: {node_status['status']}"
+                )
+                result.append({
+                    "name": monitor.node_name,
+                    "namespace": monitor.namespace,
+                    "full_name": full_name,
+                    "monitored": True,
+                    "status": node_status["status"],
+                })
         
         # Sort by full name
         result.sort(key=lambda x: x["full_name"])
         
         return JSONResponse(result)
     except Exception as e:
-        logging.getLogger('topic_list_node').exception("Failed to get nodes")
+        logging.getLogger('introspection_node').exception("Failed to get nodes")
         return JSONResponse({"error": f"Failed to get nodes: {e}"}, status_code=500)
+
+
+@app.post("/api/node_monitor/{node_full_name:path}")
+def start_node_monitor(node_full_name: str):
+    """Start monitoring a node."""
+    global node
+    if node is None:
+        return JSONResponse({"error": "ROS2 node not initialized"}, status_code=500)
+    
+    try:
+        # Parse node name and namespace
+        parts = node_full_name.split('/')
+        if len(parts) >= 2:
+            name = parts[-1]
+            namespace = '/'.join(parts[:-1]) if len(parts) > 2 else '/'
+            if not namespace:
+                namespace = '/'
+        else:
+            name = node_full_name
+            namespace = '/'
+        
+        started = node.add_node_monitor(name, namespace)
+        if started:
+            save_config()  # Save config after starting node monitor
+            return JSONResponse({"node": node_full_name, "monitored": True})
+        else:
+            return JSONResponse({"node": node_full_name, "monitored": True, "message": "Already monitoring"})
+    except Exception as e:
+        logging.getLogger('introspection_node').exception(f"Failed to start node monitor for {node_full_name}")
+        return JSONResponse({"error": f"Failed to start node monitor: {e}"}, status_code=500)
+
+
+@app.delete("/api/node_monitor/{node_full_name:path}")
+def stop_node_monitor(node_full_name: str):
+    """Stop monitoring a node."""
+    global node
+    if node is None:
+        return JSONResponse({"error": "ROS2 node not initialized"}, status_code=500)
+    
+    try:
+        removed = node.remove_node_monitor(node_full_name)
+        if removed:
+            save_config()  # Save config after stopping node monitor
+            return JSONResponse({"node": node_full_name, "monitored": False})
+        else:
+            return JSONResponse({"error": f"Node {node_full_name} was not being monitored"}, status_code=404)
+    except Exception as e:
+        logging.getLogger('introspection_node').exception(f"Failed to stop node monitor for {node_full_name}")
+        return JSONResponse({"error": f"Failed to stop node monitor: {e}"}, status_code=500)
+
+
+@app.get("/api/monitored_nodes")
+def get_monitored_nodes():
+    """Return list of monitored nodes with their status."""
+    global node
+    if node is None:
+        return JSONResponse({"error": "ROS2 node not initialized"}, status_code=500)
+    
+    try:
+        result = node.get_monitored_nodes()
+        return JSONResponse(result)
+    except Exception as e:
+        logging.getLogger('introspection_node').exception("Failed to get monitored nodes")
+        return JSONResponse({"error": f"Failed to get monitored nodes: {e}"}, status_code=500)
 
 
 @app.get("/api/topic_info/{topic:path}")
@@ -604,7 +805,7 @@ def get_topic_info(topic: str):
         
         return JSONResponse(result)
     except Exception as e:
-        logging.getLogger('topic_list_node').exception(f"Failed to get info for topic {topic}")
+        logging.getLogger('introspection_node').exception(f"Failed to get info for topic {topic}")
         return JSONResponse({"error": f"Failed to get topic info: {e}"}, status_code=500)
 
 
@@ -671,5 +872,5 @@ def get_node_info(node_name: str):
         
         return JSONResponse(result)
     except Exception as e:
-        logging.getLogger('topic_list_node').exception(f"Failed to get info for node {node_name}")
+        logging.getLogger('introspection_node').exception(f"Failed to get info for node {node_name}")
         return JSONResponse({"error": f"Failed to get node info: {e}"}, status_code=500)

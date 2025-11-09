@@ -613,10 +613,7 @@ function setSelectedIndex(i, opts = {}) {
     renderList();
     ensureSelectedInView();
     const topic = filteredTopics[selectedIndex];
-    // for now: log; you can replace with pushing selection to backend or opening detail pane
-    console.log("Selected topic:", topic);
     if (opts.userAction) {
-        // small feedback
         setStatus(`selected ${topic.topic}`);
     }
 }
@@ -638,8 +635,6 @@ function onKeyDown(e) {
         return;
     e.preventDefault();
     if (!filteredTopics.length) return;
-    // print the key pressed to console
-    console.log(`Key pressed: ${e.key}`);
     
     // Space bar toggles monitoring
     if (e.key === ' ') {
@@ -992,6 +987,7 @@ function renderNodeList() {
     header.innerHTML = `
         <div class="header-cell">Node Name</div>
         <div class="header-cell">Namespace</div>
+        <div class="header-cell">Status</div>
     `;
     nodeListEl.appendChild(header);
     
@@ -1009,8 +1005,26 @@ function renderNodeList() {
         namespace.className = "node-namespace";
         namespace.textContent = n.namespace;
         
+        // Add status column
+        const status = document.createElement("div");
+        status.className = "node-status";
+        
+        if (n.monitored) {
+            const badge = document.createElement("span");
+            badge.className = "badge node-status-badge";
+            if (n.status === "MIA") {
+                badge.className += " status-mia";
+                badge.textContent = "MIA";
+            } else {
+                badge.className += " status-active";
+                badge.textContent = "active";
+            }
+            status.appendChild(badge);
+        }
+        
         item.appendChild(name);
         item.appendChild(namespace);
+        item.appendChild(status);
         
         item.addEventListener("click", () => {
             setSelectedNodeIndex(i, { userAction: true });
@@ -1018,6 +1032,7 @@ function renderNodeList() {
             if (expandedNodeIndex >= 0) {
                 collapseNodeDetails();
             }
+            nodeListEl.focus();
         });
         
         // double-click -> expand details
@@ -1140,13 +1155,55 @@ function setSelectedNodeIndex(i, opts = {}) {
     renderNodeList();
     ensureSelectedNodeInView();
     const node = filteredNodes[selectedNodeIndex];
-    console.log("Selected node:", node);
 }
 
 function onNodeKeyDown(e) {
-    if (!["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(e.key)) return;
+    if (!["ArrowUp", "ArrowDown", " ", "PageUp", "PageDown", "Home", "End"].includes(e.key)) return;
     e.preventDefault();
     if (!filteredNodes.length) return;
+    // Space bar toggles node monitoring
+    if (e.key === ' ') {
+        e.preventDefault();
+        const n = filteredNodes[selectedNodeIndex];
+        if (!n) {
+            return;
+        }
+        const nodeEnc = encodeURIComponent(n.full_name);
+        
+        // optimistic UI update
+        n.monitored = !n.monitored;
+        if (n.monitored) {
+            n.status = "active";
+        } else {
+            n.status = null;
+        }
+        renderNodeList();
+        
+        // toggle monitored
+        if (!n.monitored) {
+            // after optimistic toggle we set to unmonitored, so we must DELETE
+            fetch(`/api/node_monitor/${nodeEnc}`, { method: 'DELETE' })
+                .then((resp) => {
+                    return fetchNodesOnce();
+                })
+                .catch((err) => {
+                    console.error('Failed to stop node monitor', err);
+                    fetchNodesOnce();
+                });
+        } else {
+            fetch(`/api/node_monitor/${nodeEnc}`, { method: 'POST' })
+                .then(async (resp) => {
+                    const result = await resp.json();
+                    await fetchNodesOnce();
+                    const refreshedNode = filteredNodes.find(nd => nd.full_name === n.full_name);
+                })
+                .catch((err) => {
+                    console.error('Failed to start node monitor', err);
+                    fetchNodesOnce();
+                });
+        }
+        return;
+    }
     
     if (e.key === "ArrowUp") {
         collapseNodeDetails();
@@ -1313,13 +1370,19 @@ document.addEventListener("visibilitychange", () => {
 
 // make sure clicking outside doesn't steal focus from keyboard interactions
 document.body.addEventListener("click", (e) => {
-    if (!listEl.contains(e.target)) return;
-    // keep focus on list so arrow keys continue to work
-    listEl.focus();
+    if (listEl.contains(e.target)) {
+        // keep focus on list so arrow keys continue to work
+        listEl.focus();
+    } else if (nodeListEl.contains(e.target)) {
+        // keep focus on nodeListEl so arrow keys continue to work
+        nodeListEl.focus();
+    }
 });
 
 // ======= Node Browser Event Listeners =======
-nodeListEl.addEventListener("keydown", onNodeKeyDown);
+nodeListEl.addEventListener("keydown", (e) => {
+    onNodeKeyDown(e);
+});
 
 // Node search toggle button
 nodeSearchToggleBtn.addEventListener("click", () => {
@@ -1335,11 +1398,23 @@ nodeSearchInput.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
         e.preventDefault();
         collapseNodeSearch();
-    } else if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(e.key)) {
+    } else if (["ArrowUp", "ArrowDown", " ", "PageUp", "PageDown", "Home", "End"].includes(e.key)) {
         e.preventDefault();
         onNodeKeyDown(e);
     }
 });
+
+// Global handler to prevent space from scrolling when lists are focused
+// Use capture phase to ensure we don't interfere with element handlers
+document.addEventListener("keydown", (e) => {
+    // Prevent space from scrolling the page when topic/node list is focused
+    if (e.key === " " && currentTab === "topics" && document.activeElement === listEl) {
+        e.preventDefault();
+    }
+    if (e.key === " " && currentTab === "nodes" && document.activeElement === nodeListEl) {
+        e.preventDefault();
+    }
+}, false); // Use bubbling phase, not capture
 
 // Global escape handler to collapse node search when expanded
 document.addEventListener("keydown", (e) => {
