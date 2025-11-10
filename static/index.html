@@ -56,14 +56,17 @@
                     <div class="status" id="status">idle</div>
                 </div>
 
-                <div
-                    id="list"
-                    class="list"
-                    tabindex="0"
-                    role="listbox"
-                    aria-label="ROS2 topics"
-                >
-                    <div class="empty" id="empty">Loading topics…</div>
+                <div class="list-container">
+                    <div id="topicHeader" class="topic-header"></div>
+                    <div
+                        id="list"
+                        class="list"
+                        tabindex="0"
+                        role="listbox"
+                        aria-label="ROS2 topics"
+                    >
+                        <div class="empty" id="empty">Loading topics…</div>
+                    </div>
                 </div>
 
                 <div class="hint">
@@ -99,14 +102,17 @@
                     </label>
                 </div>
 
-                <div
-                    id="nodeList"
-                    class="list"
-                    tabindex="0"
-                    role="listbox"
-                    aria-label="ROS2 nodes"
-                >
-                    <div class="empty" id="nodeEmpty">Loading nodes…</div>
+                <div class="list-container">
+                    <div id="nodeHeader" class="node-header"></div>
+                    <div
+                        id="nodeList"
+                        class="list"
+                        tabindex="0"
+                        role="listbox"
+                        aria-label="ROS2 nodes"
+                    >
+                        <div class="empty" id="nodeEmpty">Loading nodes…</div>
+                    </div>
                 </div>
 
                 <div class="hint">

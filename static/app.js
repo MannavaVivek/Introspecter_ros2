@@ -42,6 +42,9 @@ const searchToggleBtn = document.getElementById("searchToggle");
 const monitoredToggleBtn = document.getElementById("monitoredToggle");
 let isSearchExpanded = false;
 
+// Topic header element
+const topicHeaderEl = document.getElementById("topicHeader");
+
 // Node browser DOM elements
 const nodeListEl = document.getElementById("nodeList");
 const nodeEmptyEl = document.getElementById("nodeEmpty");
@@ -50,6 +53,9 @@ const nodeClearSearchBtn = document.getElementById("nodeClearSearch");
 const nodeSearchToggleBtn = document.getElementById("nodeSearchToggle");
 const nodeMonitoredToggleBtn = document.getElementById("nodeMonitoredToggle");
 let isNodeSearchExpanded = false;
+
+// Node header element
+const nodeHeaderEl = document.getElementById("nodeHeader");
 
 // Modal elements (will be initialized after DOM loads)
 let detailsModal = null;
@@ -388,22 +394,22 @@ function renderList() {
     isInputRendered = false;
     
     listEl.innerHTML = "";
-    if (!filteredTopics.length) {
+    
+    // Render column headers (once, outside the scrollable list)
+    if (filteredTopics.length > 0) {
+        topicHeaderEl.innerHTML = `
+            <div class="header-cell">Topic Name</div>
+            <div class="header-cell">Status</div>
+            <div class="header-cell">Rate</div>
+            <div class="header-cell">Expected Rate</div>
+        `;
+        topicHeaderEl.style.display = 'grid';
+    } else {
+        topicHeaderEl.style.display = 'none';
         emptyEl.textContent = searchQuery ? `No topics matching "${searchQuery}"` : "No topics being monitored";
         listEl.appendChild(emptyEl);
         return;
     }
-
-    // Add column headers
-    const header = document.createElement("div");
-    header.className = "topic-header";
-    header.innerHTML = `
-        <div class="header-cell">Topic Name</div>
-        <div class="header-cell">Status</div>
-        <div class="header-cell">Rate</div>
-        <div class="header-cell">Expected Rate</div>
-    `;
-    listEl.appendChild(header);
 
     filteredTopics.forEach((t, i) => {
         const item = document.createElement("div");
@@ -1117,21 +1123,20 @@ async function fetchNodesOnce() {
 function renderNodeList() {
     nodeListEl.innerHTML = "";
     
-    if (!filteredNodes.length) {
+    // Render column headers (once, outside the scrollable list)
+    if (filteredNodes.length > 0) {
+        nodeHeaderEl.innerHTML = `
+            <div class="header-cell">Node Name</div>
+            <div class="header-cell">Namespace</div>
+            <div class="header-cell">Status</div>
+        `;
+        nodeHeaderEl.style.display = 'grid';
+    } else {
+        nodeHeaderEl.style.display = 'none';
         nodeEmptyEl.textContent = nodeSearchQuery ? `No nodes matching "${nodeSearchQuery}"` : "No nodes found";
         nodeListEl.appendChild(nodeEmptyEl);
         return;
     }
-    
-    // Add column headers
-    const header = document.createElement("div");
-    header.className = "node-header";
-    header.innerHTML = `
-        <div class="header-cell">Node Name</div>
-        <div class="header-cell">Namespace</div>
-        <div class="header-cell">Status</div>
-    `;
-    nodeListEl.appendChild(header);
     
     filteredNodes.forEach((n, i) => {
         const item = document.createElement("div");
