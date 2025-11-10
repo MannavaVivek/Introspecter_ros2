@@ -583,8 +583,7 @@ function renderList() {
         listEl.appendChild(item);
     });
 
-    // ensure selected is visible
-    ensureSelectedInView();
+    // Don't auto-scroll on render - only scroll when keyboard navigating
 }
 
 function ensureSelectedInView() {
@@ -599,7 +598,7 @@ function setSelectedIndex(i, opts = {}) {
     if (!filteredTopics.length) return;
     selectedIndex = clamp(i, 0, filteredTopics.length - 1);
     renderList();
-    ensureSelectedInView();
+    // Don't auto-scroll - let keyboard navigation handle scrolling
     const topic = filteredTopics[selectedIndex];
     if (opts.userAction) {
         setStatus(`selected ${topic.topic}`);
@@ -1197,7 +1196,7 @@ function renderNodeList() {
         nodeListEl.appendChild(item);
     });
     
-    ensureSelectedNodeInView();
+    // Don't auto-scroll on render - only scroll when keyboard navigating
 }
 
 function ensureSelectedNodeInView() {
@@ -1212,7 +1211,7 @@ function setSelectedNodeIndex(i, opts = {}) {
     if (!filteredNodes.length) return;
     selectedNodeIndex = clamp(i, 0, filteredNodes.length - 1);
     renderNodeList();
-    ensureSelectedNodeInView();
+    // Don't auto-scroll - let keyboard navigation handle scrolling
     const node = filteredNodes[selectedNodeIndex];
 }
 
