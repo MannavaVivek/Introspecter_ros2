@@ -12,6 +12,10 @@ import threading
 import json
 from rclpy.qos import QoSProfile
 
+# Configure logging to reduce verbosity
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
+
 # -------------------------------
 # ROS2 Node to list topics
 # -------------------------------
