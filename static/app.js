@@ -31,6 +31,9 @@ let showMonitoredNodesOnly = false; // filter to show only monitored nodes
 // Modal state
 let modalOpen = false;
 
+// Theme state
+let currentTheme = localStorage.getItem('theme') || 'dark';
+
 const listEl = document.getElementById("list");
 const statusEl = document.getElementById("status");
 const emptyEl = document.getElementById("empty");
@@ -97,6 +100,28 @@ function hideModal() {
     detailsModal.style.display = "none";
     modalOpen = false;
     document.body.style.overflow = "";
+}
+
+// Theme toggle functionality
+function toggleTheme() {
+    currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    applyTheme(currentTheme);
+    localStorage.setItem('theme', currentTheme);
+    
+    // Return focus to the active list for keyboard navigation
+    if (currentTab === 'topics') {
+        listEl.focus();
+    } else if (currentTab === 'nodes') {
+        nodeListEl.focus();
+    }
+}
+
+function applyTheme(theme) {
+    if (theme === 'light') {
+        document.body.classList.add('light-mode');
+    } else {
+        document.body.classList.remove('light-mode');
+    }
 }
 
 // Set up modal event listeners (called once on initialization)
@@ -1359,6 +1384,12 @@ function clearNodeSearch() {
 }
 
 // ======= Wire up events =======
+// Theme toggle button
+const themeToggleBtn = document.getElementById("themeToggle");
+if (themeToggleBtn) {
+    themeToggleBtn.addEventListener("click", toggleTheme);
+}
+
 // Tab switching
 document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -1427,6 +1458,9 @@ document.addEventListener("click", (e) => {
 
 // focus the list on page load (search is collapsed by default)
 window.addEventListener("load", () => {
+    // Apply saved theme
+    applyTheme(currentTheme);
+    
     listEl.focus();
     startPolling();
     initModalHandlers(); // Initialize modal event handlers
