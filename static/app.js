@@ -1086,6 +1086,20 @@ function buildNodeDetailsHTML(details) {
     `;
 }
 
+// Open log viewer for a node
+function openNodeLogs(nodeName) {
+    const encodedNodeName = encodeURIComponent(nodeName);
+    const logUrl = `/logs?node=${encodedNodeName}`;
+    const windowName = `logs_${nodeName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    
+    // Open in new tab (no window features = new tab instead of popup)
+    const newTab = window.open(logUrl, windowName);
+    
+    if (!newTab) {
+        alert('Tab blocked! Please allow popups/new tabs for this site to view logs.');
+    }
+}
+
 function filterNodes() {
     let result = nodes;
     
@@ -1154,6 +1168,7 @@ function renderNodeList() {
             <div class="header-cell">Node Name</div>
             <div class="header-cell">Namespace</div>
             <div class="header-cell">Status</div>
+            <div class="header-cell">Actions</div>
         `;
         nodeHeaderEl.style.display = 'grid';
     } else {
@@ -1194,9 +1209,24 @@ function renderNodeList() {
             status.appendChild(badge);
         }
         
+        // Add actions column with logs button
+        const actions = document.createElement("div");
+        actions.className = "node-actions";
+        
+        const logsBtn = document.createElement("button");
+        logsBtn.className = "logs-btn";
+        logsBtn.textContent = "Logs";
+        logsBtn.title = "Open log viewer";
+        logsBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            openNodeLogs(n.full_name);
+        });
+        actions.appendChild(logsBtn);
+        
         item.appendChild(name);
         item.appendChild(namespace);
         item.appendChild(status);
+        item.appendChild(actions);
         
         item.addEventListener("click", () => {
             // Just update selection without re-rendering

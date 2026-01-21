@@ -1,5 +1,5 @@
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import rclpy
@@ -10,19 +10,50 @@ import importlib
 import logging
 import threading
 import json
+import asyncio
+import time
+import struct
+from collections import deque
 from rclpy.qos import QoSProfile
+from rcl_interfaces.msg import Log
 
 # Configure logging to reduce verbosity
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
+
+# Create a filter to suppress socket send errors (these are normal when clients disconnect)
+class SocketErrorFilter(logging.Filter):
+    def filter(self, record):
+        # Get the full record message
+        try:
+            message = str(record.getMessage()).lower()
+            msg = str(record.msg).lower() if hasattr(record, 'msg') else ""
+            
+            # Filter out socket/connection errors that are normal when clients disconnect
+            error_patterns = [
+                "socket.send() raised exception",
+                "socket.send",
+            ]
+            
+            for pattern in error_patterns:
+                if pattern in message or pattern in msg:
+                    return False
+        except Exception:
+            pass
+        return True
+
+# Apply filter to all loggers that might show these errors
+socket_filter = SocketErrorFilter()
+for logger_name in ["uvicorn", "uvicorn.error", "uvicorn.access", "uvicorn.protocols", "uvicorn.protocols.http"]:
+    try:
+        logger = logging.getLogger(logger_name)
+        logger.addFilter(socket_filter)
+        logger.setLevel(logging.WARNING)
+    except Exception:
+        pass
 
 # -------------------------------
 # ROS2 Node to list topics
 # -------------------------------
-
-import time
-import struct
-from collections import deque
 
 
 def extract_ros_time_from_serialized(serialized_msg):
@@ -158,6 +189,13 @@ class TopicListNode(Node):
         self.node_monitors = {}  # dict of full_name -> NodeMonitor
         self._node_check_timer = None
         self._start_node_health_check()
+        
+        # Log streaming
+        self.log_subscribers = {}  # dict of subscriber_id -> dict with queue and node_name
+        self.log_subscriber_counter = 0
+        self._log_subscribers_lock = threading.Lock()
+        self._rosout_subscription = None
+        self._start_rosout_subscription()
 
     def add_topic_monitor(self, topic_name, topic_type=None):
         """
@@ -312,6 +350,106 @@ class TopicListNode(Node):
         for full_name, monitor in self.node_monitors.items():
             result.append(monitor.get_status())
         return result
+    
+    def _start_rosout_subscription(self):
+        """Subscribe to /rosout topic for log streaming."""
+        try:
+            self._rosout_subscription = self.create_subscription(
+                Log,
+                '/rosout',
+                self._rosout_callback,
+                QoSProfile(depth=100)
+            )
+            self.get_logger().info("Subscribed to /rosout for log streaming")
+        except Exception as e:
+            self.get_logger().error(f"Failed to subscribe to /rosout: {e}")
+    
+    def _rosout_callback(self, msg):
+        """Handle incoming log messages from /rosout."""
+        # Distribute log to all active subscribers that match the node
+        # Get a snapshot of subscribers with lock
+        with self._log_subscribers_lock:
+            subscribers_snapshot = list(self.log_subscribers.items())
+        
+        # Process outside the lock to avoid blocking
+        for subscriber_id, sub_info in subscribers_snapshot:
+            node_name = sub_info['node_name']
+            full_node_name = sub_info.get('full_node_name', node_name)
+            
+            # ROS2 logs can use either slash or dot notation for namespaces
+            # Convert full_node_name to dot notation for comparison
+            # e.g., "/global_costmap/global_costmap" -> "global_costmap.global_costmap"
+            full_node_name_dots = full_node_name.replace('/', '.').lstrip('.')
+            
+            # Check if this log is from the subscribed node
+            msg_name = msg.name
+            is_match = (
+                msg_name == node_name or  # Simple name match
+                msg_name == full_node_name or  # Full name match (slash notation)
+                msg_name == full_node_name_dots or  # Full name match (dot notation)
+                msg_name.endswith(f"/{node_name}") or  # Ends with /node_name
+                msg_name.endswith(f".{node_name}")  # Ends with .node_name
+            )
+            
+            if is_match:
+                try:
+                    # Put log message in queue (non-blocking)
+                    sub_info['queue'].put_nowait({
+                        'timestamp': msg.stamp.sec + msg.stamp.nanosec / 1e9,
+                        'level': msg.level,
+                        'name': msg.name,
+                        'msg': msg.msg,
+                        'file': msg.file,
+                        'function': msg.function,
+                        'line': msg.line
+                    })
+                except Exception:
+                    # Queue is full or subscriber removed, skip this message
+                    pass
+    
+    def create_log_subscriber(self, node_name, full_node_name=None):
+        """Create a log subscriber for a specific node.
+        
+        Args:
+            node_name: Simple node name (last part without namespace)
+            full_node_name: Full node name including namespace (e.g., /namespace/node_name)
+        """
+        import queue
+        
+        with self._log_subscribers_lock:
+            subscriber_id = self.log_subscriber_counter
+            self.log_subscriber_counter += 1
+            
+            log_queue = queue.Queue(maxsize=500)  # Limit queue size to prevent memory issues
+            self.log_subscribers[subscriber_id] = {
+                'node_name': node_name,
+                'full_node_name': full_node_name or node_name,
+                'queue': log_queue
+            }
+            
+            self.get_logger().info(f"Created log subscriber {subscriber_id} for node {node_name}")
+            return subscriber_id
+    
+    def remove_log_subscriber(self, subscriber_id):
+        """Remove a log subscriber."""
+        with self._log_subscribers_lock:
+            if subscriber_id in self.log_subscribers:
+                # Clear the queue before deleting
+                try:
+                    while not self.log_subscribers[subscriber_id]['queue'].empty():
+                        self.log_subscribers[subscriber_id]['queue'].get_nowait()
+                except Exception:
+                    pass
+                
+                del self.log_subscribers[subscriber_id]
+                self.get_logger().info(f"Removed log subscriber {subscriber_id}")
+    
+    def get_log_queue(self, subscriber_id):
+        """Get the log queue for a subscriber."""
+        with self._log_subscribers_lock:
+            if subscriber_id in self.log_subscribers:
+                return self.log_subscribers[subscriber_id]['queue']
+            return None
 
 
 # -------------------------------
@@ -324,10 +462,16 @@ app = FastAPI(title="ROS2 Topic Monitor")
 # requests when the frontend uses either hostname.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:8000", "http://localhost:8000"],
+    allow_origins=[
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+        "http://127.0.0.1:*",
+        "http://localhost:*"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Serve static files (frontend)
@@ -878,3 +1022,133 @@ def get_node_info(node_name: str):
     except Exception as e:
         logging.getLogger('introspection_node').exception(f"Failed to get info for node {node_name}")
         return JSONResponse({"error": f"Failed to get node info: {e}"}, status_code=500)
+
+
+@app.get("/api/node_logs/{node_name:path}")
+async def stream_node_logs(node_name: str, request: Request):
+    """Stream logs for a specific node using Server-Sent Events."""
+    global node
+    if node is None:
+        return JSONResponse({"error": "ROS2 node not initialized"}, status_code=500)
+    
+    # Parse node name from full path to get just the node name (last part)
+    parts = node_name.split('/')
+    if len(parts) >= 2:
+        simple_name = parts[-1]
+    else:
+        simple_name = node_name
+    
+    # Store full node name for matching (ROS2 logs include full name)
+    full_node_name = node_name if node_name.startswith('/') else f'/{node_name}'
+    
+    logging.getLogger('introspection_node').info(f"Starting log stream for node: {full_node_name} (simple name: {simple_name})")
+    
+    # Create a log subscriber with both full name and simple name for flexible matching
+    subscriber_id = node.create_log_subscriber(simple_name, full_node_name)
+    log_queue = node.get_log_queue(subscriber_id)
+    
+    if log_queue is None:
+        logging.getLogger('introspection_node').error(f"Failed to create log queue for subscriber {subscriber_id}")
+        return JSONResponse({"error": "Failed to create log subscriber"}, status_code=500)
+    
+    async def event_generator():
+        connection_alive = True
+        try:
+            # Small delay to ensure connection is established
+            await asyncio.sleep(0.1)
+            
+            # Send initial connection message
+            try:
+                yield f"data: {json.dumps({'type': 'connected', 'node': node_name})}\n\n"
+                await asyncio.sleep(0.05)
+            except GeneratorExit:
+                # Client disconnected immediately
+                connection_alive = False
+                return
+            except Exception:
+                connection_alive = False
+                return
+            
+            while connection_alive:
+                # Check if client is still connected
+                if await request.is_disconnected():
+                    connection_alive = False
+                    break
+                
+                # Check for new log messages
+                try:
+                    # Non-blocking get with timeout
+                    log_msg = log_queue.get(timeout=0.5)  # Shorter timeout to check disconnect more frequently
+                    
+                    # Map log level to string
+                    level_map = {
+                        10: 'DEBUG',
+                        20: 'INFO',
+                        30: 'WARN',
+                        40: 'ERROR',
+                        50: 'FATAL'
+                    }
+                    level_str = level_map.get(log_msg['level'], 'UNKNOWN')
+                    
+                    # Format log message similar to ROS2 console output
+                    log_data = {
+                        'type': 'log',
+                        'timestamp': log_msg['timestamp'],
+                        'level': level_str,
+                        'name': log_msg['name'],
+                        'message': log_msg['msg'],
+                        'file': log_msg['file'],
+                        'function': log_msg['function'],
+                        'line': log_msg['line']
+                    }
+                    
+                    try:
+                        yield f"data: {json.dumps(log_data)}\n\n"
+                    except (GeneratorExit, StopIteration):
+                        # Client disconnected
+                        connection_alive = False
+                        break
+                    except Exception:
+                        # Any other error means connection is dead
+                        connection_alive = False
+                        break
+                    
+                except Exception:
+                    # Timeout - send keepalive
+                    try:
+                        yield ": keepalive\n\n"
+                    except (GeneratorExit, StopIteration):
+                        # Client disconnected during keepalive
+                        connection_alive = False
+                        break
+                    except Exception:
+                        # Any error means connection is dead
+                        connection_alive = False
+                        break
+                    await asyncio.sleep(0.1)
+                
+        except (asyncio.CancelledError, GeneratorExit):
+            # Client disconnected
+            pass
+        except Exception:
+            # Any other exception, just stop
+            pass
+        finally:
+            # Always clean up subscriber
+            node.remove_log_subscriber(subscriber_id)
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable proxy buffering
+        }
+    )
+
+
+@app.get("/logs")
+def serve_logs_page():
+    """Serve the log viewer page."""
+    return FileResponse(STATIC_DIR / "logs.html")

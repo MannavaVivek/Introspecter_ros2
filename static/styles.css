@@ -827,7 +827,7 @@ body.light-mode .theme-toggle .moon-icon {
 /* Node Browser Styles */
 .node-header {
     display: grid;
-    grid-template-columns: 1fr 1fr 100px;
+    grid-template-columns: 1fr 1fr 100px 100px;
     gap: 12px;
     padding: 8px 12px;
     margin: 0 0 8px 0;
@@ -843,7 +843,8 @@ body.light-mode .theme-toggle .moon-icon {
     display: flex;
     align-items: center;
 }
-.node-header .header-cell:last-child {
+.node-header .header-cell:nth-child(3),
+.node-header .header-cell:nth-child(4) {
     justify-content: center;
 }
 .node {
@@ -851,7 +852,7 @@ body.light-mode .theme-toggle .moon-icon {
     border-radius: 6px;
     margin: 6px;
     display: grid;
-    grid-template-columns: 1fr 1fr 100px;
+    grid-template-columns: 1fr 1fr 100px 100px;
     align-items: center;
     gap: 12px;
     cursor: pointer;
@@ -882,6 +883,43 @@ body.light-mode .theme-toggle .moon-icon {
     justify-content: center;
     align-items: center;
 }
+.node-actions {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+}
+.logs-btn {
+    background: rgba(6, 182, 212, 0.1);
+    border: 1px solid rgba(6, 182, 212, 0.3);
+    color: var(--accent);
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    font-family: inherit;
+}
+.logs-btn:hover {
+    background: rgba(6, 182, 212, 0.2);
+    border-color: var(--accent);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(6, 182, 212, 0.2);
+}
+.logs-btn:active {
+    transform: translateY(0);
+}
+body.light-mode .logs-btn {
+    background: rgba(8, 145, 178, 0.1);
+    border-color: rgba(8, 145, 178, 0.3);
+    color: var(--accent);
+}
+body.light-mode .logs-btn:hover {
+    background: rgba(8, 145, 178, 0.2);
+    border-color: var(--accent);
+}
 
 /* Responsive adjustments for smaller screens */
 @media (max-width: 768px) {
@@ -899,7 +937,7 @@ body.light-mode .theme-toggle .moon-icon {
     }
     .node-header,
     .node {
-        grid-template-columns: 1fr 1fr 80px;
+        grid-template-columns: 1fr 1fr 80px 80px;
         gap: 8px;
     }
     .node-name,
@@ -908,5 +946,9 @@ body.light-mode .theme-toggle .moon-icon {
     }
     .toggle-label {
         font-size: 11px;
+    }
+    .logs-btn {
+        padding: 4px 8px;
+        font-size: 10px;
     }
 }

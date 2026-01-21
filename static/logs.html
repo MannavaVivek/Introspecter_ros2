@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Node Logs</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        body.light-mode {
+            background: #ffffff;
+            color: #1e1e1e;
+        }
+        
+        .header {
+            background: #252526;
+            padding: 12px 20px;
+            border-bottom: 1px solid #3e3e42;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        
+        body.light-mode .header {
+            background: #f3f3f3;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .node-name {
+            font-size: 16px;
+            font-weight: bold;
+            color: #4ec9b0;
+        }
+        
+        body.light-mode .node-name {
+            color: #098658;
+        }
+        
+        .status {
+            font-size: 12px;
+            color: #858585;
+        }
+        
+        body.light-mode .status {
+            color: #6a6a6a;
+        }
+        
+        .status.connected {
+            color: #4ec9b0;
+        }
+        
+        body.light-mode .status.connected {
+            color: #098658;
+        }
+        
+        .status.disconnected {
+            color: #f48771;
+        }
+        
+        .header-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        button {
+            background: #3e3e42;
+            border: 1px solid #3e3e42;
+            color: #d4d4d4;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 12px;
+            border-radius: 3px;
+            transition: background 0.2s;
+        }
+        
+        body.light-mode button {
+            background: #e0e0e0;
+            border: 1px solid #d0d0d0;
+            color: #1e1e1e;
+        }
+        
+        button:hover {
+            background: #505053;
+        }
+        
+        body.light-mode button:hover {
+            background: #d0d0d0;
+        }
+        
+        button:active {
+            background: #3e3e42;
+        }
+        
+        body.light-mode button:active {
+            background: #c0c0c0;
+        }
+        
+        .log-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            font-size: 13px;
+            line-height: 1.5;
+            font-family: 'Consolas', 'Courier New', monospace;
+        }
+        
+        .log-entry {
+            padding: 2px 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .log-timestamp {
+            color: #858585;
+        }
+        
+        body.light-mode .log-timestamp {
+            color: #6a6a6a;
+        }
+        
+        .log-level {
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 2px;
+            margin: 0 4px;
+        }
+        
+        .log-level.DEBUG {
+            color: #b5cea8;
+            background: rgba(181, 206, 168, 0.1);
+        }
+        
+        body.light-mode .log-level.DEBUG {
+            color: #267f00;
+            background: rgba(38, 127, 0, 0.1);
+        }
+        
+        .log-level.INFO {
+            color: #4ec9b0;
+            background: rgba(78, 201, 176, 0.1);
+        }
+        
+        body.light-mode .log-level.INFO {
+            color: #098658;
+            background: rgba(9, 134, 88, 0.1);
+        }
+        
+        .log-level.WARN {
+            color: #dcdcaa;
+            background: rgba(220, 220, 170, 0.1);
+        }
+        
+        body.light-mode .log-level.WARN {
+            color: #795e26;
+            background: rgba(121, 94, 38, 0.1);
+        }
+        
+        .log-level.ERROR {
+            color: #f48771;
+            background: rgba(244, 135, 113, 0.1);
+        }
+        
+        body.light-mode .log-level.ERROR {
+            color: #cd3131;
+            background: rgba(205, 49, 49, 0.1);
+        }
+        
+        .log-level.FATAL {
+            color: #f44747;
+            background: rgba(244, 71, 71, 0.15);
+            font-weight: bold;
+        }
+        
+        body.light-mode .log-level.FATAL {
+            color: #a31515;
+            background: rgba(163, 21, 21, 0.15);
+        }
+        
+        .log-message {
+            color: #d4d4d4;
+        }
+        
+        body.light-mode .log-message {
+            color: #1e1e1e;
+        }
+        
+        .log-source {
+            color: #858585;
+            font-size: 11px;
+            margin-left: 8px;
+        }
+        
+        body.light-mode .log-source {
+            color: #6a6a6a;
+        }
+        
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #858585;
+            font-size: 14px;
+        }
+        
+        body.light-mode .empty-state {
+            color: #6a6a6a;
+        }
+        
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        
+        .filter-controls {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+        
+        .filter-btn {
+            padding: 4px 8px;
+            font-size: 11px;
+        }
+        
+        .filter-btn.active {
+            background: #007acc;
+            border-color: #007acc;
+        }
+        
+        body.light-mode .filter-btn.active {
+            background: #0078d4;
+            border-color: #0078d4;
+            color: #ffffff;
+        }
+        
+        /* Scrollbar styling */
+        .log-container::-webkit-scrollbar {
+            width: 10px;
+        }
+        
+        .log-container::-webkit-scrollbar-track {
+            background: #1e1e1e;
+        }
+        
+        body.light-mode .log-container::-webkit-scrollbar-track {
+            background: #f0f0f0;
+        }
+        
+        .log-container::-webkit-scrollbar-thumb {
+            background: #424242;
+            border-radius: 5px;
+        }
+        
+        body.light-mode .log-container::-webkit-scrollbar-thumb {
+            background: #c0c0c0;
+        }
+        
+        .log-container::-webkit-scrollbar-thumb:hover {
+            background: #4e4e4e;
+        }
+        
+        body.light-mode .log-container::-webkit-scrollbar-thumb:hover {
+            background: #a0a0a0;
+        }
+        
+        .auto-scroll-toggle {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 12px;
+        }
+        
+        .auto-scroll-toggle input[type="checkbox"] {
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <div class="node-name" id="nodeName">Loading...</div>
+            <div class="status" id="status">Connecting...</div>
+        </div>
+        <div class="header-controls">
+            <div class="filter-controls">
+                <button class="filter-btn active" data-level="all">All</button>
+                <button class="filter-btn" data-level="DEBUG">Debug</button>
+                <button class="filter-btn" data-level="INFO">Info</button>
+                <button class="filter-btn" data-level="WARN">Warn</button>
+                <button class="filter-btn" data-level="ERROR">Error</button>
+                <button class="filter-btn" data-level="FATAL">Fatal</button>
+            </div>
+            <div class="auto-scroll-toggle">
+                <input type="checkbox" id="autoScroll" checked>
+                <label for="autoScroll">Auto-scroll</label>
+            </div>
+            <button id="clearBtn">Clear</button>
+            <button id="themeToggle">Toggle Theme</button>
+        </div>
+    </div>
+    <div class="log-container" id="logContainer">
+        <div class="empty-state">
+            <div class="empty-state-icon">📋</div>
+            <div>Waiting for logs...</div>
+        </div>
+    </div>
+
+    <script>
+        // Get node name from URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const nodeName = urlParams.get('node');
+        
+        // DOM elements
+        const nodeNameEl = document.getElementById('nodeName');
+        const statusEl = document.getElementById('status');
+        const logContainer = document.getElementById('logContainer');
+        const clearBtn = document.getElementById('clearBtn');
+        const themeToggle = document.getElementById('themeToggle');
+        const autoScrollCheckbox = document.getElementById('autoScroll');
+        
+        // State
+        let eventSource = null;
+        let logCount = 0;
+        let autoScroll = true;
+        let levelFilter = 'all';
+        let currentTheme = localStorage.getItem('logViewerTheme') || 'dark';
+        
+        // Apply saved theme
+        if (currentTheme === 'light') {
+            document.body.classList.add('light-mode');
+        }
+        
+        // Set node name in title
+        if (nodeName) {
+            nodeNameEl.textContent = nodeName;
+            document.title = `Logs: ${nodeName}`;
+        } else {
+            nodeNameEl.textContent = 'Unknown Node';
+            statusEl.textContent = 'Error: No node specified';
+            statusEl.classList.add('disconnected');
+        }
+        
+        // Format timestamp
+        function formatTimestamp(timestamp) {
+            const date = new Date(timestamp * 1000);
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            const ms = String(date.getMilliseconds()).padStart(3, '0');
+            return `${hours}:${minutes}:${seconds}.${ms}`;
+        }
+        
+        // Add log entry to container
+        function addLogEntry(logData) {
+            // Check level filter
+            if (levelFilter !== 'all' && logData.level !== levelFilter) {
+                return;
+            }
+            
+            // Remove empty state if it exists
+            const emptyState = logContainer.querySelector('.empty-state');
+            if (emptyState) {
+                emptyState.remove();
+            }
+            
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            
+            const timestamp = document.createElement('span');
+            timestamp.className = 'log-timestamp';
+            timestamp.textContent = `[${formatTimestamp(logData.timestamp)}]`;
+            
+            const level = document.createElement('span');
+            level.className = `log-level ${logData.level}`;
+            level.textContent = logData.level;
+            
+            const message = document.createElement('span');
+            message.className = 'log-message';
+            message.textContent = logData.message;
+            
+            entry.appendChild(timestamp);
+            entry.appendChild(level);
+            entry.appendChild(message);
+            
+            // Add source info if available
+            if (logData.file && logData.line) {
+                const source = document.createElement('span');
+                source.className = 'log-source';
+                const filename = logData.file.split('/').pop();
+                source.textContent = `(${filename}:${logData.line})`;
+                entry.appendChild(source);
+            }
+            
+            logContainer.appendChild(entry);
+            logCount++;
+            
+            // Auto-scroll to bottom if enabled
+            if (autoScroll) {
+                logContainer.scrollTop = logContainer.scrollHeight;
+            }
+        }
+        
+        // Connect to log stream
+        function connectToStream() {
+            if (!nodeName) return;
+            
+            const encodedNodeName = encodeURIComponent(nodeName);
+            const url = `/api/node_logs/${encodedNodeName}`;
+            console.log('Connecting to log stream:', url);
+            
+            try {
+                eventSource = new EventSource(url);
+                
+                eventSource.onopen = () => {
+                    console.log('EventSource connection opened');
+                    statusEl.textContent = 'Connected';
+                    statusEl.classList.add('connected');
+                    statusEl.classList.remove('disconnected');
+                };
+                
+                eventSource.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        
+                        if (data.type === 'connected') {
+                            console.log('Connected to log stream for', data.node);
+                        } else if (data.type === 'log') {
+                            addLogEntry(data);
+                        }
+                    } catch (err) {
+                        console.error('Failed to parse log message:', err, event.data);
+                    }
+                };
+                
+                eventSource.onerror = (error) => {
+                    console.error('EventSource error:', error);
+                    console.log('EventSource readyState:', eventSource.readyState);
+                    
+                    if (eventSource.readyState === EventSource.CLOSED) {
+                        statusEl.textContent = 'Connection closed';
+                        statusEl.classList.remove('connected');
+                        statusEl.classList.add('disconnected');
+                    } else if (eventSource.readyState === EventSource.CONNECTING) {
+                        statusEl.textContent = 'Reconnecting...';
+                        statusEl.classList.remove('connected');
+                        statusEl.classList.add('disconnected');
+                    }
+                };
+            } catch (err) {
+                console.error('Failed to create EventSource:', err);
+                statusEl.textContent = 'Failed to connect';
+                statusEl.classList.add('disconnected');
+            }
+        }
+        
+        // Clear logs
+        clearBtn.addEventListener('click', () => {
+            logContainer.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><div>Waiting for logs...</div></div>';
+            logCount = 0;
+        });
+        
+        // Toggle theme
+        themeToggle.addEventListener('click', () => {
+            currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            if (currentTheme === 'light') {
+                document.body.classList.add('light-mode');
+            } else {
+                document.body.classList.remove('light-mode');
+            }
+            localStorage.setItem('logViewerTheme', currentTheme);
+        });
+        
+        // Auto-scroll toggle
+        autoScrollCheckbox.addEventListener('change', (e) => {
+            autoScroll = e.target.checked;
+        });
+        
+        // Level filter buttons
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                // Update active state
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                
+                // Update filter
+                levelFilter = e.target.dataset.level;
+                
+                // Re-render logs (for now, just clear and let new logs come in with filter)
+                // In a more advanced implementation, we could store all logs and re-filter them
+                if (levelFilter !== 'all') {
+                    // Hide non-matching logs
+                    document.querySelectorAll('.log-entry').forEach(entry => {
+                        const levelEl = entry.querySelector('.log-level');
+                        if (levelEl) {
+                            const entryLevel = levelEl.textContent.trim();
+                            if (entryLevel === levelFilter || levelFilter === 'all') {
+                                entry.style.display = '';
+                            } else {
+                                entry.style.display = 'none';
+                            }
+                        }
+                    });
+                } else {
+                    // Show all logs
+                    document.querySelectorAll('.log-entry').forEach(entry => {
+                        entry.style.display = '';
+                    });
+                }
+            });
+        });
+        
+        // Start connection
+        connectToStream();
+        
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            if (eventSource) {
+                eventSource.close();
+            }
+        });
+    </script>
+</body>
+</html>
